@@ -807,10 +807,8 @@ class App(ctk.CTk):
     def _run_beh(self, beh: BehaviorBase) -> None:
         try:
             self.robot.start_simulation()
-            gr, gc = self._maze.goal
             cell_sz = float(self._cell_m.get())
-            goal_x = (gc * cell_sz) + (cell_sz / 2.0)
-            goal_y = (gr * cell_sz) + (cell_sz / 2.0)
+            goal_x, goal_y = self._maze.cell_world_pos(*self._maze.goal, cell_sz)
             while not self._stop_event.is_set():
                 sensors = self.robot.read_sensors()
                 vl, vr = beh.step(sensors)

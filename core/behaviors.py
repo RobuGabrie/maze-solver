@@ -313,13 +313,13 @@ class QLearningBehavior(BehaviorBase):
         super().__init__(robot)
         self.alpha: float = 0.25
         self.gamma: float = 0.92
-        self.epsilon: float = 0.35
+        self.epsilon: float = 0.20
         # 0 = Q-learning, 1 = SARSA
         self.algo: int = 0
-        self.epsilon_decay: float = 0.992
+        self.epsilon_decay: float = 0.995
         self.epsilon_min: float = 0.05
-        self.v_base: float = 2.0
-        self.v_turn: float = 2.4
+        self.v_base: float = 3.5
+        self.v_turn: float = 3.0
         self.collision_dist: float = 0.18
         self.step_penalty: float = 0.02
         self.forward_reward: float = 0.20
@@ -346,11 +346,11 @@ class QLearningBehavior(BehaviorBase):
         return [
             {"name": "alpha", "label": "Alpha (learning rate)", "min": 0.05, "max": 0.8, "default": 0.25, "step": 0.05},
             {"name": "gamma", "label": "Gamma (discount)", "min": 0.50, "max": 0.99, "default": 0.92, "step": 0.01},
-            {"name": "epsilon", "label": "Epsilon (explore start)", "min": 0.01, "max": 1.0, "default": 0.35, "step": 0.01},
-            {"name": "epsilon_decay", "label": "Epsilon decay", "min": 0.90, "max": 0.999, "default": 0.992, "step": 0.001},
+            {"name": "epsilon", "label": "Epsilon (explore start)", "min": 0.01, "max": 1.0, "default": 0.20, "step": 0.01},
+            {"name": "epsilon_decay", "label": "Epsilon decay", "min": 0.90, "max": 0.999, "default": 0.995, "step": 0.001},
             {"name": "epsilon_min", "label": "Epsilon minimum", "min": 0.01, "max": 0.30, "default": 0.05, "step": 0.01},
-            {"name": "v_base", "label": "Forward speed (rad/s)", "min": 0.5, "max": 5.0, "default": 2.0, "step": 0.5},
-            {"name": "v_turn", "label": "Turn speed (rad/s)", "min": 0.5, "max": 5.0, "default": 2.4, "step": 0.2},
+            {"name": "v_base", "label": "Forward speed (rad/s)", "min": 0.5, "max": 8.0, "default": 3.5, "step": 0.5},
+            {"name": "v_turn", "label": "Turn speed (rad/s)", "min": 0.5, "max": 6.0, "default": 3.0, "step": 0.2},
             {"name": "collision_dist", "label": "Collision distance (m)", "min": 0.08, "max": 0.4, "default": 0.18, "step": 0.02},
             {"name": "step_penalty", "label": "Step penalty", "min": 0.0, "max": 0.20, "default": 0.02, "step": 0.01},
             {"name": "forward_reward", "label": "Forward reward", "min": 0.0, "max": 1.0, "default": 0.20, "step": 0.05},
