@@ -23,6 +23,7 @@ except ImportError:
 
 from core.behaviors import QLearningBehavior, SENSOR_LABELS, BehaviorBase, DT
 from core.pathfinding import ALGORITHMS, PathResult
+from core.grid_rl import RUNNERS, GridEnv
 from core.maze import (
     GridMaze,
     WALL_HEX,
@@ -611,7 +612,7 @@ class App(ctk.CTk):
         )
         self._classical_output.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
-        # ── Right column: RL benchmark (requires simulator) ──────────────────
+        # ── Right column: RL benchmark (grid simulation, no simulator needed) ─
         right_col = ctk.CTkFrame(parent, fg_color="transparent")
         right_col.pack(side="left", fill="both", expand=True)
 
@@ -625,14 +626,16 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=15, weight="bold"), text_color=_SB_TEXT
         ).pack(anchor="w")
         ctk.CTkLabel(
-            left_top, text="Q-Learning · SARSA · Expected SARSA · Dyna-Q",
+            left_top, text="Grid simulation — no simulator required",
             font=ctk.CTkFont(size=11), text_color=_SB_MUTED
         ).pack(anchor="w")
 
         right_top = ctk.CTkFrame(top, fg_color="transparent")
         right_top.pack(side="right", padx=16, pady=12)
-        ctk.CTkLabel(right_top, text="Episodes:", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 6))
-        ctk.CTkEntry(right_top, textvariable=self._exp_episodes, width=60, fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(right_top, text="Episodes:", text_color=_SB_MUTED,
+                     font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 6))
+        ctk.CTkEntry(right_top, textvariable=self._exp_episodes, width=60,
+                     fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left", padx=(0, 10))
         self._btn_bench = ctk.CTkButton(
             right_top, text="⚡  Run RL Benchmark",
             fg_color=_SB_WARN, hover_color="#d97706", text_color="#0f1923",
@@ -641,16 +644,30 @@ class App(ctk.CTk):
         )
         self._btn_bench.pack(side="left")
 
+        # Chart image area
+        chart_card = _card(right_col, border_color=_SB_CARD_B)
+        chart_card.pack(fill="both", expand=True, pady=(0, 10))
+
+        self._bench_chart_lbl = ctk.CTkLabel(
+            chart_card,
+            text="Apasă  ⚡ Run RL Benchmark  pentru a vedea graficul de convergență.",
+            font=ctk.CTkFont(size=12), text_color=_SB_MUTED,
+            fg_color="transparent"
+        )
+        self._bench_chart_lbl.pack(expand=True)
+
+        # Summary textbox
         output_card = _card(right_col, border_color=_SB_CARD_B)
-        output_card.pack(fill="both", expand=True)
+        output_card.pack(fill="x")
 
         ctk.CTkLabel(
-            output_card, text="RL BENCHMARK OUTPUT",
+            output_card, text="SUMMARY",
             font=ctk.CTkFont(size=9, weight="bold"), text_color=_SB_MUTED
-        ).pack(anchor="w", padx=16, pady=(12, 4))
+        ).pack(anchor="w", padx=16, pady=(10, 4))
 
         self._exp_output = ctk.CTkTextbox(
             output_card,
+            height=160,
             fg_color="#080f1d",
             font=ctk.CTkFont(family="Courier", size=12),
             text_color=_SB_ACCENT2,
@@ -658,7 +675,7 @@ class App(ctk.CTk):
             border_width=1, border_color=_SB_CARD_B,
             corner_radius=8
         )
-        self._exp_output.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self._exp_output.pack(fill="x", padx=16, pady=(0, 14))
 
     # ══════════════════════════════════════════════════════════════
     # 6. Monitor Page
@@ -1167,61 +1184,119 @@ class App(ctk.CTk):
         threading.Thread(target=self._run_compare_worker, args=(eps,), daemon=True).start()
 
     def _run_compare_worker(self, episodes: int) -> None:
+        import io
+        import matplotlib
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        if not self.robot.connected:
-            self._append_exp_output("Error: Connect to CoppeliaSim first!")
+
+        self._append_exp_output(f"Running {episodes} episodes per algorithm on current maze...\n")
+
+        env = GridEnv(self._maze)
+        all_results: dict[str, list] = {}
+
+        for name, runner in RUNNERS.items():
+            if self._stop_event.is_set():
+                break
+            self._append_exp_output(f"  [{name}] ...")
+            data = runner(env, episodes)
+            all_results[name] = data
+            solved = sum(1 for _, _, ok in data if ok)
+            avg_steps = sum(s for _, s, ok in data if ok) / max(1, solved)
+            last_10_r = sum(r for r, _, _ in data[-10:]) / 10
+            self._append_exp_output(
+                f"  [{name}] solved {solved}/{episodes} eps  "
+                f"avg_steps={avg_steps:.1f}  last10_reward={last_10_r:.1f}"
+            )
+
+        if self._stop_event.is_set():
+            self._append_exp_output("\n[STOPPED]")
             self._btn_bench.configure(state="normal")
             return
 
-        algoritmi = {0: "Q-learning", 1: "SARSA", 2: "Expected SARSA", 3: "Dyna-Q"}
-        results = {id_alg: [] for id_alg in algoritmi}
-        try:
-            self.robot.load_robot()
-            self.robot.start_simulation()
-            for algo_id, algo_name in algoritmi.items():
-                self._append_exp_output(f"\n[START] Running model: {algo_name}")
-                beh = QLearningBehavior(self.robot)
-                beh.algo = algo_id
-                ep_done = 0
-                last_episode = beh._episode
-                current_ep_reward = 0.0
-                while ep_done < episodes and not self._stop_event.is_set():
-                    sensors = self.robot.read_sensors()
-                    pos = self.robot.get_position()
-                    vl, vr = beh.step(sensors, pos=pos)
-                    self.robot.set_velocity(vl, vr)
-                    current_ep_reward += getattr(beh, "_last_reward", 0.0)
-                    if beh._episode != last_episode:
-                        results[algo_id].append(current_ep_reward)
-                        ep_done += 1
-                        last_episode = beh._episode
-                        if ep_done % 10 == 0 or ep_done == episodes:
-                            self._append_exp_output(f"  → {algo_name} | Episode {ep_done}/{episodes} done.")
-                        current_ep_reward = 0.0
-                    time.sleep(DT)
-                if self._stop_event.is_set():
-                    break
+        # ── Summary table ───────────────────────────────────────────
+        self._append_exp_output("\n" + "─" * 62)
+        self._append_exp_output(
+            f"{'Algorithm':<16} {'Solved':>7} {'Solve%':>7} "
+            f"{'AvgSteps':>9} {'BestRew':>9}"
+        )
+        self._append_exp_output("─" * 62)
+        for name, data in all_results.items():
+            solved = sum(1 for _, _, ok in data if ok)
+            pct = solved / episodes * 100
+            avg_s = sum(s for _, s, ok in data if ok) / max(1, solved)
+            best_r = max(r for r, _, _ in data)
+            self._append_exp_output(
+                f"{name:<16} {solved:>7} {pct:>6.1f}% "
+                f"{avg_s:>9.1f} {best_r:>9.1f}"
+            )
+        self._append_exp_output("─" * 62)
 
-            fig, ax = plt.subplots(figsize=(9, 5))
-            for algo_id, algo_name in algoritmi.items():
-                if results[algo_id]:
-                    ax.plot(range(1, len(results[algo_id]) + 1), results[algo_id], label=algo_name, linewidth=2)
-            ax.set_title("Comparative RL Model Study")
-            ax.set_xlabel("Episodes")
-            ax.set_ylabel("Cumulative Reward")
-            ax.grid(True)
-            ax.legend()
-            fig.savefig(_ROOT / "config" / "benchmark_last.png", bbox_inches="tight")
-            plt.close(fig)
-            self._append_exp_output("\n[DONE] Benchmark complete! Chart saved.")
-        except Exception as e:
-            self._append_exp_output(f"Error: {e}")
-        finally:
-            try:
-                self.robot.stop_simulation()
-            except Exception:
-                pass
-            self._btn_bench.configure(state="normal")
+        # ── Chart ───────────────────────────────────────────────────
+        colors = ["#3b82f6", "#34d399", "#fbbf24", "#a78bfa"]
+
+        def smooth(vals, w=6):
+            out = []
+            for i in range(len(vals)):
+                sl = vals[max(0, i - w): i + w + 1]
+                out.append(sum(sl) / len(sl))
+            return out
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4),
+                                        facecolor="#0f1923")
+        for ax in (ax1, ax2):
+            ax.set_facecolor("#162032")
+            for sp in ax.spines.values():
+                sp.set_edgecolor("#1e3a5c")
+            ax.tick_params(colors="#94a3b8", labelsize=9)
+            ax.xaxis.label.set_color("#94a3b8")
+            ax.yaxis.label.set_color("#94a3b8")
+            ax.title.set_color("#e2e8f0")
+            ax.grid(color="#1e3a5c", linestyle="--", linewidth=0.5, alpha=0.8)
+
+        eps_x = list(range(1, episodes + 1))
+        for (name, data), col in zip(all_results.items(), colors):
+            rewards = [r for r, _, _ in data]
+            ax1.plot(eps_x, smooth(rewards), color=col, lw=2, label=name)
+
+        ax1.set_xlabel("Episod")
+        ax1.set_ylabel("Recompensă totală")
+        ax1.set_title("Recompensă per episod (smoothed)")
+        ax1.legend(fontsize=8, facecolor="#162032", edgecolor="#1e3a5c",
+                   labelcolor="#e2e8f0")
+
+        window = max(1, episodes // 10)
+        for (name, data), col in zip(all_results.items(), colors):
+            rates = []
+            for i in range(len(data)):
+                sl = data[max(0, i - window): i + 1]
+                rates.append(sum(1 for _, _, ok in sl if ok) / len(sl) * 100)
+            ax2.plot(eps_x, rates, color=col, lw=2, label=name)
+
+        ax2.set_xlabel("Episod")
+        ax2.set_ylabel("Rată rezolvare (%)")
+        ax2.set_title("Rată succes (fereastră mobilă)")
+        ax2.set_ylim(0, 105)
+        ax2.legend(fontsize=8, facecolor="#162032", edgecolor="#1e3a5c",
+                   labelcolor="#e2e8f0")
+
+        fig.tight_layout(pad=1.2)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
+                    facecolor="#0f1923")
+        plt.close(fig)
+        buf.seek(0)
+
+        from PIL import Image as PILImage
+        pil_img = PILImage.open(buf)
+        ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img,
+                               size=(pil_img.width // 2, pil_img.height // 2))
+
+        self._bench_chart_lbl.configure(image=ctk_img, text="")
+        self._bench_chart_lbl._image = ctk_img  # keep reference
+
+        self._append_exp_output("\n[DONE] Benchmark finalizat.")
+        self._btn_bench.configure(state="normal")
 
     def _append_exp_output(self, text: str) -> None:
         try:
