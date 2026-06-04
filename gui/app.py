@@ -22,6 +22,7 @@ except ImportError:
     _PIL_OK = False
 
 from core.behaviors import QLearningBehavior, SENSOR_LABELS, BehaviorBase, DT
+from core.pathfinding import ALGORITHMS, PathResult
 from core.maze import (
     GridMaze,
     WALL_HEX,
@@ -89,6 +90,9 @@ class App(ctk.CTk):
         self._placing_mobile: bool = False
         self._adding_waypoint: bool = False
         self._hover_cell: tuple[int, int] | None = None
+
+        self._path_result: PathResult | None = None
+        self._solve_algo_var = ctk.StringVar(value="A* (Manhattan)")
 
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
@@ -429,6 +433,26 @@ class App(ctk.CTk):
         self._preset_cb.pack(fill="x", padx=14, pady=3)
         _primary_btn(ctrl, "Save Preset", self._on_save_preset, color="#1a6b3c").pack(fill="x", padx=14, pady=2)
 
+        _divider(ctrl)
+        _section_label(ctrl, "PATHFINDING")
+
+        self._solve_algo_cb = ctk.CTkComboBox(
+            ctrl, values=list(ALGORITHMS.keys()),
+            variable=self._solve_algo_var,
+            fg_color="#0d1929", border_color=_SB_CARD_B,
+            button_color=_SB_ACCENT, dropdown_fg_color=_SB_CARD
+        )
+        self._solve_algo_cb.pack(fill="x", padx=14, pady=3)
+
+        _primary_btn(ctrl, "▶  Solve Maze", self._on_solve, color=_SB_ACCENT2).pack(fill="x", padx=14, pady=(4, 2))
+        _ghost_btn(ctrl, "Clear Path", self._on_clear_path).pack(fill="x", padx=14, pady=2)
+
+        self._solve_info = ctk.CTkLabel(
+            ctrl, text="", font=ctk.CTkFont(family="Courier", size=10),
+            text_color=_SB_MUTED, wraplength=220, justify="left"
+        )
+        self._solve_info.pack(fill="x", padx=14, pady=4)
+
         # Canvas area
         canvas_frame = ctk.CTkFrame(parent, fg_color=_SB_CARD, corner_radius=10, border_width=1, border_color=_SB_CARD_B)
         canvas_frame.pack(side="left", fill="both", expand=True)
@@ -547,39 +571,81 @@ class App(ctk.CTk):
     # ══════════════════════════════════════════════════════════════
 
     def _build_bench_page(self, parent: ctk.CTkFrame) -> None:
-        # Top bar
-        top = _card(parent, border_color=_SB_CARD_B)
-        top.pack(fill="x", pady=(0, 12))
+        # ── Left column: Classical pathfinding benchmark (no simulator needed) ──
+        left_col = ctk.CTkFrame(parent, width=420, fg_color="transparent")
+        left_col.pack(side="left", fill="y", padx=(0, 12))
+        left_col.pack_propagate(False)
+
+        classical_card = _card(left_col, border_color=_SB_CARD_B)
+        classical_card.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(
+            classical_card, text="Classical Pathfinding",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=_SB_ACCENT2
+        ).pack(anchor="w", padx=16, pady=(14, 2))
+        ctk.CTkLabel(
+            classical_card, text="Runs instantly on the current maze — no simulator required.",
+            font=ctk.CTkFont(size=11), text_color=_SB_MUTED
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+
+        _primary_btn(
+            classical_card, "▶  Run All 5 Algorithms", self._on_run_classical, color=_SB_ACCENT2
+        ).pack(fill="x", padx=16, pady=(0, 14))
+
+        results_card = _card(left_col, border_color=_SB_CARD_B)
+        results_card.pack(fill="both", expand=True)
+
+        ctk.CTkLabel(
+            results_card, text="RESULTS",
+            font=ctk.CTkFont(size=9, weight="bold"), text_color=_SB_MUTED
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        self._classical_output = ctk.CTkTextbox(
+            results_card,
+            fg_color="#080f1d",
+            font=ctk.CTkFont(family="Courier", size=12),
+            text_color=_SB_ACCENT2,
+            state="disabled",
+            border_width=1, border_color=_SB_CARD_B,
+            corner_radius=8
+        )
+        self._classical_output.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+        # ── Right column: RL benchmark (requires simulator) ──────────────────
+        right_col = ctk.CTkFrame(parent, fg_color="transparent")
+        right_col.pack(side="left", fill="both", expand=True)
+
+        top = _card(right_col, border_color=_SB_CARD_B)
+        top.pack(fill="x", pady=(0, 10))
 
         left_top = ctk.CTkFrame(top, fg_color="transparent")
         left_top.pack(side="left", fill="y", padx=16, pady=12)
         ctk.CTkLabel(
-            left_top, text="Multi-Model Benchmark",
-            font=ctk.CTkFont(size=17, weight="bold"), text_color=_SB_TEXT
+            left_top, text="RL Model Benchmark",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=_SB_TEXT
         ).pack(anchor="w")
         ctk.CTkLabel(
-            left_top, text="Q-Learning vs SARSA vs Expected SARSA vs Dyna-Q",
+            left_top, text="Q-Learning · SARSA · Expected SARSA · Dyna-Q",
             font=ctk.CTkFont(size=11), text_color=_SB_MUTED
         ).pack(anchor="w")
 
         right_top = ctk.CTkFrame(top, fg_color="transparent")
         right_top.pack(side="right", padx=16, pady=12)
-        ctk.CTkLabel(right_top, text="Episodes per Model:", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 6))
-        ctk.CTkEntry(right_top, textvariable=self._exp_episodes, width=72, fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(right_top, text="Episodes:", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 6))
+        ctk.CTkEntry(right_top, textvariable=self._exp_episodes, width=60, fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left", padx=(0, 10))
         self._btn_bench = ctk.CTkButton(
-            right_top, text="⚡  Run Full Benchmark",
+            right_top, text="⚡  Run RL Benchmark",
             fg_color=_SB_WARN, hover_color="#d97706", text_color="#0f1923",
             font=ctk.CTkFont(size=13, weight="bold"), height=36,
             command=self._on_run_compare
         )
         self._btn_bench.pack(side="left")
 
-        # Output box
-        output_card = _card(parent, border_color=_SB_CARD_B)
+        output_card = _card(right_col, border_color=_SB_CARD_B)
         output_card.pack(fill="both", expand=True)
 
         ctk.CTkLabel(
-            output_card, text="BENCHMARK OUTPUT",
+            output_card, text="RL BENCHMARK OUTPUT",
             font=ctk.CTkFont(size=9, weight="bold"), text_color=_SB_MUTED
         ).pack(anchor="w", padx=16, pady=(12, 4))
 
@@ -688,6 +754,31 @@ class App(ctk.CTk):
                 x0 = ox + c * cp
                 y0 = oy + r * cp
                 canvas.create_rectangle(x0, y0, x0 + cp, y0 + cp, fill=_C_CELL, outline="#0f1f35")
+
+        # Draw explored cells (pathfinding visited nodes)
+        if self._path_result:
+            explored_set = set(self._path_result.explored)
+            path_set = set(self._path_result.path) if self._path_result.path else set()
+            for (er, ec) in explored_set - path_set:
+                if 0 <= er < rows and 0 <= ec < cols:
+                    x0 = ox + ec * cp + 1
+                    y0 = oy + er * cp + 1
+                    canvas.create_rectangle(x0, y0, x0 + cp - 2, y0 + cp - 2, fill=_C_EXPLORED, outline="")
+
+            # Draw path cells
+            if self._path_result.path:
+                for (pr, pc) in self._path_result.path:
+                    if 0 <= pr < rows and 0 <= pc < cols:
+                        x0 = ox + pc * cp + 2
+                        y0 = oy + pr * cp + 2
+                        canvas.create_rectangle(x0, y0, x0 + cp - 4, y0 + cp - 4, fill=_C_PATH, outline="")
+
+                # Draw path as a connected line on top
+                pts = []
+                for (pr, pc) in self._path_result.path:
+                    pts.extend([ox + pc * cp + cp / 2, oy + pr * cp + cp / 2])
+                if len(pts) >= 4:
+                    canvas.create_line(pts, fill=_C_PATH, width=max(2, int(cp * 0.18)), smooth=True, capstyle="round")
 
         sr, sc = m.start
         gr, gc = m.goal
@@ -802,6 +893,7 @@ class App(ctk.CTk):
         rows = _clamp(rows, 2, 25)
         cols = _clamp(cols, 2, 25)
         self._maze = GridMaze(rows, cols)
+        self._path_result = None
         self._rows_var.set(str(rows))
         self._cols_var.set(str(cols))
         _set_entry(self._goal_r, str(rows - 1))
@@ -861,6 +953,7 @@ class App(ctk.CTk):
 
     def _on_clear_walls(self) -> None:
         self._maze = GridMaze(self._maze.rows, self._maze.cols)
+        self._path_result = None
         self._redraw()
 
     def _load_presets(self) -> None:
@@ -889,8 +982,33 @@ class App(ctk.CTk):
         self._preset_cb.configure(values=[v[0] for v in self._presets.values()])
         self._preset_cb.set(name)
 
+    def _on_solve(self) -> None:
+        algo_name = self._solve_algo_var.get()
+        algo_fn = ALGORITHMS.get(algo_name)
+        if algo_fn is None:
+            return
+        self._path_result = algo_fn(self._maze)
+        r = self._path_result
+        if r.found:
+            self._solve_info.configure(
+                text=f"✓ {algo_name}\nPath: {r.path_length} steps\nExplored: {r.explored_count} cells\nTime: {r.time_ms:.3f} ms",
+                text_color=_SB_ACCENT2
+            )
+        else:
+            self._solve_info.configure(
+                text=f"✗ {algo_name}\nNo path found!\nExplored: {r.explored_count} cells",
+                text_color=_SB_DANGER
+            )
+        self._redraw()
+
+    def _on_clear_path(self) -> None:
+        self._path_result = None
+        self._solve_info.configure(text="")
+        self._redraw()
+
     def _apply_maze_to_ui(self, maze: GridMaze) -> None:
         self._maze = maze.clone()
+        self._path_result = None
         self._rows_var.set(str(self._maze.rows))
         self._cols_var.set(str(self._maze.cols))
         self._update_start_goal_entries()
@@ -1012,6 +1130,32 @@ class App(ctk.CTk):
                 self._q.put_nowait({"type": "stopped"})
             except queue.Full:
                 pass
+
+    def _on_run_classical(self) -> None:
+        self._classical_output.configure(state="normal")
+        self._classical_output.delete("1.0", "end")
+        header = f"{'Algorithm':<18} {'Found':>6} {'Steps':>6} {'Explored':>9} {'Time(ms)':>10}\n"
+        self._classical_output.insert("end", header)
+        self._classical_output.insert("end", "─" * 54 + "\n")
+
+        best_steps = None
+        rows_data = []
+        for name, fn in ALGORITHMS.items():
+            result = fn(self._maze)
+            rows_data.append((name, result))
+            if result.found and (best_steps is None or result.path_length < best_steps):
+                best_steps = result.path_length
+
+        for name, r in rows_data:
+            if r.found:
+                marker = " ★" if r.path_length == best_steps else ""
+                line = f"{name:<18} {'YES':>6} {r.path_length:>6} {r.explored_count:>9} {r.time_ms:>9.3f}{marker}\n"
+            else:
+                line = f"{name:<18} {'NO':>6} {'—':>6} {r.explored_count:>9} {r.time_ms:>9.3f}\n"
+            self._classical_output.insert("end", line)
+
+        self._classical_output.insert("end", "\n★ = shortest path\n")
+        self._classical_output.configure(state="disabled")
 
     def _on_run_compare(self) -> None:
         try:

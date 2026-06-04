@@ -321,10 +321,10 @@ class QLearningBehavior(BehaviorBase):
         self.v_base: float = 7.0
         self.v_turn: float = 5.5
         self.collision_dist: float = 0.18
-        self.step_penalty: float = 0.02
-        self.forward_reward: float = 0.20
-        self.clearance_reward: float = 1.20
-        self.collision_penalty: float = 8.0
+        self.step_penalty: float = 0.01
+        self.forward_reward: float = 0.50
+        self.clearance_reward: float = 1.50
+        self.collision_penalty: float = 10.0
         self.stuck_limit: int = 35
 
         self._q_table: dict[tuple[int, int, int], list[float]] = {}
@@ -352,10 +352,10 @@ class QLearningBehavior(BehaviorBase):
             {"name": "v_base", "label": "Forward speed (rad/s)", "min": 0.5, "max": 12.0, "default": 7.0, "step": 0.5},
             {"name": "v_turn", "label": "Turn speed (rad/s)", "min": 0.5, "max": 10.0, "default": 5.5, "step": 0.2},
             {"name": "collision_dist", "label": "Collision distance (m)", "min": 0.08, "max": 0.4, "default": 0.18, "step": 0.02},
-            {"name": "step_penalty", "label": "Step penalty", "min": 0.0, "max": 0.20, "default": 0.02, "step": 0.01},
-            {"name": "forward_reward", "label": "Forward reward", "min": 0.0, "max": 1.0, "default": 0.20, "step": 0.05},
-            {"name": "clearance_reward", "label": "Clearance reward", "min": 0.0, "max": 4.0, "default": 1.20, "step": 0.10},
-            {"name": "collision_penalty", "label": "Collision penalty", "min": 1.0, "max": 20.0, "default": 8.0, "step": 0.5},
+            {"name": "step_penalty", "label": "Step penalty", "min": 0.0, "max": 0.20, "default": 0.01, "step": 0.01},
+            {"name": "forward_reward", "label": "Forward reward", "min": 0.0, "max": 2.0, "default": 0.50, "step": 0.05},
+            {"name": "clearance_reward", "label": "Clearance reward", "min": 0.0, "max": 4.0, "default": 1.50, "step": 0.10},
+            {"name": "collision_penalty", "label": "Collision penalty", "min": 1.0, "max": 20.0, "default": 10.0, "step": 0.5},
             {"name": "stuck_limit", "label": "Stuck limit (steps)", "min": 10, "max": 120, "default": 35, "step": 1},
             {"name": "algo", "label": "Algo (0=Q,1=SARSA)", "min": 0, "max": 1, "default": 0, "step": 1},
         ]
@@ -379,24 +379,34 @@ class QLearningBehavior(BehaviorBase):
     def _q_values(self, state: tuple[int, int, int]) -> list[float]:
         values = self._q_table.get(state)
         if values is None:
-            values = [0.0] * len(self._ACTION_NAMES)
+            # Optimistic init: bias FORWARD > CURVE > TURN/BACK so the agent
+            # moves purposefully from the very first episode instead of wandering.
+            values = [0.30, 0.10, 0.10, 0.00, 0.00, -0.10]
             self._q_table[state] = values
         return values
 
     def _choose_action(self, state: tuple[int, int, int], front: float, left: float, right: float) -> int:
         if front < self.collision_dist:
             if left > right + 0.05:
-                return 3
+                return 3  # TURN_LEFT
             if right > left + 0.05:
-                return 4
-            return 5
+                return 4  # TURN_RIGHT
+            return 5       # BACK_UP
 
         if random.random() < self.epsilon:
-            return random.randrange(len(self._ACTION_NAMES))
+            # Weighted exploration: prefer forward/curve over turning/backing up
+            return random.choices(
+                [0, 1, 2, 3, 4, 5],
+                weights=[40, 20, 20, 8, 8, 4],
+                k=1
+            )[0]
 
         values = self._q_values(state)
         best_value = max(values)
-        best_actions = [i for i, value in enumerate(values) if value == best_value]
+        best_actions = [i for i, v in enumerate(values) if v == best_value]
+        # Prefer FORWARD when tied (also handles the all-equal case)
+        if 0 in best_actions:
+            return 0
         return random.choice(best_actions)
 
     def _action_velocities(self, action: int) -> tuple[float, float]:
