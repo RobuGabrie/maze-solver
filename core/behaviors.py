@@ -318,8 +318,8 @@ class QLearningBehavior(BehaviorBase):
         self.algo: int = 0
         self.epsilon_decay: float = 0.995
         self.epsilon_min: float = 0.05
-        self.v_base: float = 3.5
-        self.v_turn: float = 3.0
+        self.v_base: float = 7.0
+        self.v_turn: float = 5.5
         self.collision_dist: float = 0.18
         self.step_penalty: float = 0.02
         self.forward_reward: float = 0.20
@@ -349,8 +349,8 @@ class QLearningBehavior(BehaviorBase):
             {"name": "epsilon", "label": "Epsilon (explore start)", "min": 0.01, "max": 1.0, "default": 0.20, "step": 0.01},
             {"name": "epsilon_decay", "label": "Epsilon decay", "min": 0.90, "max": 0.999, "default": 0.995, "step": 0.001},
             {"name": "epsilon_min", "label": "Epsilon minimum", "min": 0.01, "max": 0.30, "default": 0.05, "step": 0.01},
-            {"name": "v_base", "label": "Forward speed (rad/s)", "min": 0.5, "max": 8.0, "default": 3.5, "step": 0.5},
-            {"name": "v_turn", "label": "Turn speed (rad/s)", "min": 0.5, "max": 6.0, "default": 3.0, "step": 0.2},
+            {"name": "v_base", "label": "Forward speed (rad/s)", "min": 0.5, "max": 12.0, "default": 7.0, "step": 0.5},
+            {"name": "v_turn", "label": "Turn speed (rad/s)", "min": 0.5, "max": 10.0, "default": 5.5, "step": 0.2},
             {"name": "collision_dist", "label": "Collision distance (m)", "min": 0.08, "max": 0.4, "default": 0.18, "step": 0.02},
             {"name": "step_penalty", "label": "Step penalty", "min": 0.0, "max": 0.20, "default": 0.02, "step": 0.01},
             {"name": "forward_reward", "label": "Forward reward", "min": 0.0, "max": 1.0, "default": 0.20, "step": 0.05},
@@ -447,14 +447,17 @@ class QLearningBehavior(BehaviorBase):
                 target = reward + self.gamma * max(next_values)
         q_values[action] += self.alpha * (target - q_values[action])
 
-    def step(self, sensors: list[SensorReading]) -> tuple[float, float]:
+    def step(self, sensors: list[SensorReading], pos: tuple | None = None) -> tuple[float, float]:
         state, front, left, right = self._state_from_sensors(sensors)
         # choose current action first (needed for SARSA learning)
         action = self._choose_action(state, front, left, right)
 
-        # stuck detection: update pos history
+        # stuck detection: update pos history (use provided pos to avoid extra API call)
         try:
-            px, py, _ = self.robot.get_position()
+            if pos is not None and len(pos) >= 2:
+                px, py = pos[0], pos[1]
+            else:
+                px, py, _ = self.robot.get_position()
             self._pos_history.append((px, py))
             if len(self._pos_history) > max(10, int(self.stuck_limit)):
                 self._pos_history.pop(0)

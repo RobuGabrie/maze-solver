@@ -1,6 +1,7 @@
 """
-gui/app.py - Interfață Dashboard Cyberpunk cu Modul de Benchmarking Separat
-Implementează design Sidebar Navigation, Cerințe Echipă și Taburi de Lucru Dedicate.
+gui/app.py - Steel-Blue Modern Dashboard
+Reworked visual design: dark navy + sky-blue + emerald palette.
+All functionality from v3 preserved.
 """
 import datetime
 import math
@@ -11,12 +12,11 @@ import time
 import tkinter as tk
 from pathlib import Path
 
-from pathlib import Path
 from PIL import Image, ImageOps
 
 import customtkinter as ctk
 try:
-    from PIL import Image, ImageTk
+    from PIL import ImageTk
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False
@@ -34,25 +34,38 @@ from core.maze import (
 )
 from core.robot import Robot, SensorReading
 
-# ── căi fișiere ───────────────────────────────────────────────────
 _ROOT = Path(__file__).parent.parent
 _CONFIG = _ROOT / "config" / "mazes.json"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
-# ── paletă culori neon-cyberpunk pentru vizualizarea labirintului ──
-_C_BG        = "#06060c"  # Fundal canvas foarte închis
-_C_CELL      = "#0d0d1a"  # Interiorul unei celule libere
-_C_EXPLORED  = "#1a103c"  # Spațiu explorat de algoritmul AI
-_C_PATH      = "#39ff14"  # Traseu optim generat (Verde Neon)
-_C_START     = "#00ffff"  # Start (Cyan Neon)
-_C_GOAL      = "#ff007f"  # Goal (Roz/Magenta Neon)
-_C_WALL      = "#ff3131"  # Pereți interni (Roșu Neon)
-_C_BOUNDARY  = "#00f5ff"  # Pereți exteriori (Cyan închis)
-_C_ROBOT     = "#fffb00"  # Robotul (Galben Neon)
+# ── Steel-Blue color palette ──────────────────────────────────────────
+_SB_SIDEBAR   = "#0d1520"   # sidebar background
+_SB_APP_BG    = "#0f1923"   # main content background
+_SB_CARD      = "#162032"   # card / panel background
+_SB_CARD_B    = "#1e3a5c"   # card border
+_SB_ACCENT    = "#3b82f6"   # primary blue accent
+_SB_ACCENT2   = "#34d399"   # secondary emerald accent
+_SB_WARN      = "#fbbf24"   # amber / warning
+_SB_DANGER    = "#f87171"   # soft red
+_SB_PURPLE    = "#a78bfa"   # purple highlight
+_SB_TEXT      = "#e2e8f0"   # primary text
+_SB_MUTED     = "#64748b"   # muted / secondary text
+_SB_ACTIVE    = "#1d3f72"   # active sidebar item bg
 
-_MARGIN = 20   
+# ── Maze canvas colors (completely different from previous neon theme) ─
+_C_BG        = "#080f1d"   # canvas background
+_C_CELL      = "#0e1a2e"   # empty cell fill
+_C_EXPLORED  = "#162d52"   # explored cell
+_C_PATH      = "#34d399"   # optimal path (emerald)
+_C_START     = "#3b82f6"   # start node (blue)
+_C_GOAL      = "#fbbf24"   # goal node (amber)
+_C_WALL      = "#7c3aed"   # internal walls (purple)
+_C_BOUNDARY  = "#475569"   # outer boundary (steel)
+_C_ROBOT     = "#f87171"   # robot position (soft red)
+
+_MARGIN = 20
 
 
 def _clamp(v, lo, hi):
@@ -62,14 +75,14 @@ def _clamp(v, lo, hi):
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("AI Maze Simulator & Benchmarker v3.0")
-        self.geometry("1300x820")
+        self.title("AI Navigator — Maze RL Suite")
+        self.geometry("1340x840")
         self.minsize(1155, 720)
+        self.configure(fg_color=_SB_APP_BG)
 
-        # Core backend engine
         self.robot = Robot()
         self._maze: GridMaze = GridMaze(7, 7)
-        self._presets: dict[str, tuple[str, GridMaze]] = {}   
+        self._presets: dict[str, tuple[str, GridMaze]] = {}
         self._cell_size_m: float = 0.5
         self._mobiles: list[dict] = []
         self._selected_mobile: int | None = None
@@ -77,90 +90,117 @@ class App(ctk.CTk):
         self._adding_waypoint: bool = False
         self._hover_cell: tuple[int, int] | None = None
 
-        # Threading workers
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
         self._q: queue.Queue = queue.Queue(maxsize=10)
 
-        # Variabile UI securizate (Evită erorile Tcl de string gol)
         self._rows_var = ctk.StringVar(value="7")
         self._cols_var = ctk.StringVar(value="7")
         self._exp_episodes = ctk.StringVar(value="50")
 
-        # Construire ecran și structură taburi în Sidebar
         self._build_main_layout()
         self._load_presets()
         self._poll()
-
-        # Pornire implicită pe Pagina de Start
         self._select_menu("home")
 
     # ══════════════════════════════════════════════════════════════
-    # Structură Principală (Sidebar + Spaiu de Conținut)
+    # Layout
     # ══════════════════════════════════════════════════════════════
 
     def _build_main_layout(self) -> None:
-        # 1. Sidebar Frame (Meniu Lateral)
-        self._sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color="#0a0a14")
+        # ── Sidebar ───────────────────────────────────────────────
+        self._sidebar = ctk.CTkFrame(self, width=230, corner_radius=0, fg_color=_SB_SIDEBAR)
         self._sidebar.pack(side="left", fill="y")
         self._sidebar.pack_propagate(False)
 
-        # Identitate proiect în Meniu
-        lbl_title = ctk.CTkLabel(self._sidebar, text="Patanii", font=ctk.CTkFont(size=22, weight="bold"), text_color="#00ffff")
-        lbl_title.pack(pady=(25, 5), padx=20, anchor="w")
-        lbl_subtitle = ctk.CTkLabel(self._sidebar, text="AI Benchmarking Engine", font=ctk.CTkFont(size=12), text_color="gray50")
-        lbl_subtitle.pack(pady=(0, 25), padx=20, anchor="w")
+        logo_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
+        logo_frame.pack(fill="x", padx=16, pady=(22, 4))
+        ctk.CTkLabel(logo_frame, text="⬡", font=ctk.CTkFont(size=28), text_color=_SB_ACCENT).pack(side="left", padx=(0, 8))
+        title_col = ctk.CTkFrame(logo_frame, fg_color="transparent")
+        title_col.pack(side="left")
+        ctk.CTkLabel(title_col, text="AI Navigator", font=ctk.CTkFont(size=17, weight="bold"), text_color=_SB_TEXT).pack(anchor="w")
+        ctk.CTkLabel(title_col, text="RL Benchmark Suite", font=ctk.CTkFont(size=10), text_color=_SB_MUTED).pack(anchor="w")
 
-        # Butoane Navigare Meniu (Tabul de Benchmark acum este complet separat)
+        _divider(self._sidebar, color="#1a2d47")
+
         self._menu_btns = {}
         menu_specs = [
-            ("home", "🏠  Pagină de Start"),
-            ("doc", "📚  Concept & Algoritmi"),
-            ("maze", "🧱  Editor Labirint Visual"),
-            ("train", "⚡  Antrenare Agent"),
-            ("bench", "📊  Modul Benchmarking"),
-            ("monitor", "🖥️  Monitorizare Senzori")
+            ("home",    "◉  Start",              "Home & Team Info"),
+            ("doc",     "◎  Concepts",            "Algorithms & Docs"),
+            ("maze",    "⬜  Maze Editor",         "Visual Maze Builder"),
+            ("train",   "▷  Train Agent",          "RL Training Control"),
+            ("bench",   "≡  Benchmark",            "Multi-Model Compare"),
+            ("monitor", "◈  Monitor",             "Sensors & Logs"),
         ]
-        for key, text in menu_specs:
+        nav_section = ctk.CTkFrame(self._sidebar, fg_color="transparent")
+        nav_section.pack(fill="x", padx=10, pady=6)
+
+        for key, label, _ in menu_specs:
             btn = ctk.CTkButton(
-                self._sidebar, text=text, anchor="w", height=42,
-                fg_color="transparent", text_color="gray80", hover_color="#1a103c",
+                nav_section, text=label, anchor="w", height=38,
+                corner_radius=8,
+                fg_color="transparent",
+                text_color=_SB_MUTED,
+                hover_color="#1a2d47",
+                font=ctk.CTkFont(size=13),
                 command=lambda k=key: self._select_menu(k)
             )
-            btn.pack(fill="x", padx=12, pady=4)
+            btn.pack(fill="x", pady=2)
             self._menu_btns[key] = btn
 
-        # Zona inferioară din sidebar dedicată conexiunii cu simulatorul CoppeliaSim
-        _sep(self._sidebar)
+        # ── Connection section (bottom of sidebar) ────────────────
+        _divider(self._sidebar, color="#1a2d47")
         conn_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
-        conn_frame.pack(side="bottom", fill="x", padx=10, pady=15)
-        
-        ctk.CTkLabel(conn_frame, text="CoppeliaSim Connection", font=ctk.CTkFont(size=11, weight="bold"), text_color="gray50").pack(anchor="w", padx=5)
-        self._host = ctk.CTkEntry(conn_frame, placeholder_text="localhost", height=28)
+        conn_frame.pack(side="bottom", fill="x", padx=12, pady=14)
+
+        ctk.CTkLabel(
+            conn_frame, text="SIMULATOR", font=ctk.CTkFont(size=9, weight="bold"),
+            text_color=_SB_MUTED
+        ).pack(anchor="w", padx=4, pady=(0, 4))
+
+        self._host = ctk.CTkEntry(
+            conn_frame, placeholder_text="localhost", height=30,
+            fg_color="#0d1929", border_color="#1e3a5c", text_color=_SB_TEXT
+        )
         self._host.insert(0, "localhost")
-        self._host.pack(fill="x", pady=2, padx=5)
-        
-        self._port = ctk.CTkEntry(conn_frame, placeholder_text="23000", height=28)
+        self._host.pack(fill="x", pady=2)
+
+        self._port = ctk.CTkEntry(
+            conn_frame, placeholder_text="23000", height=30,
+            fg_color="#0d1929", border_color="#1e3a5c", text_color=_SB_TEXT
+        )
         self._port.insert(0, "23000")
-        self._port.pack(fill="x", pady=2, padx=5)
+        self._port.pack(fill="x", pady=2)
 
-        self._conn_btn = ctk.CTkButton(conn_frame, text="Conectare", height=32, fg_color="#1f6aa5", command=self._on_connect)
-        self._conn_btn.pack(fill="x", pady=(5, 2), padx=5)
-        self._conn_lbl = ctk.CTkLabel(conn_frame, text="● Deconectat", text_color="#ff3131", font=ctk.CTkFont(size=12, weight="bold"))
-        self._conn_lbl.pack(pady=2)
+        self._conn_btn = ctk.CTkButton(
+            conn_frame, text="Connect", height=34,
+            fg_color=_SB_ACCENT, hover_color="#2563eb",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._on_connect
+        )
+        self._conn_btn.pack(fill="x", pady=(6, 3))
 
-        # 2. Main Content Frame Container
-        self._content_container = ctk.CTkFrame(self, fg_color="#020205", corner_radius=0)
+        status_row = ctk.CTkFrame(conn_frame, fg_color="transparent")
+        status_row.pack(fill="x")
+        ctk.CTkLabel(status_row, text="●", font=ctk.CTkFont(size=14), text_color=_SB_DANGER).pack(side="left")
+        self._conn_lbl = ctk.CTkLabel(
+            status_row, text=" Disconnected",
+            font=ctk.CTkFont(size=11), text_color=_SB_MUTED
+        )
+        self._conn_lbl.pack(side="left")
+        self._conn_dot = status_row.winfo_children()[0]
+
+        # ── Content area ──────────────────────────────────────────
+        self._content_container = ctk.CTkFrame(self, fg_color=_SB_APP_BG, corner_radius=0)
         self._content_container.pack(side="left", fill="both", expand=True)
 
-        # Alocare pagini în container
         self._pages = {
-            "home": ctk.CTkScrollableFrame(self._content_container, fg_color="transparent"),
-            "doc": ctk.CTkScrollableFrame(self._content_container, fg_color="transparent"),
-            "maze": ctk.CTkFrame(self._content_container, fg_color="transparent"),
-            "train": ctk.CTkFrame(self._content_container, fg_color="transparent"),
-            "bench": ctk.CTkFrame(self._content_container, fg_color="transparent"),
-            "monitor": ctk.CTkFrame(self._content_container, fg_color="transparent")
+            "home":    ctk.CTkScrollableFrame(self._content_container, fg_color="transparent"),
+            "doc":     ctk.CTkScrollableFrame(self._content_container, fg_color="transparent"),
+            "maze":    ctk.CTkFrame(self._content_container, fg_color="transparent"),
+            "train":   ctk.CTkFrame(self._content_container, fg_color="transparent"),
+            "bench":   ctk.CTkFrame(self._content_container, fg_color="transparent"),
+            "monitor": ctk.CTkFrame(self._content_container, fg_color="transparent"),
         }
 
         self._build_home_page(self._pages["home"])
@@ -173,329 +213,452 @@ class App(ctk.CTk):
     def _select_menu(self, target_key: str) -> None:
         for key, page in self._pages.items():
             page.pack_forget()
-            self._menu_btns[key].configure(fg_color="transparent", text_color="gray80")
-        
-        self._pages[target_key].pack(fill="both", expand=True, padx=15, pady=15)
-        self._menu_btns[target_key].configure(fg_color="#1a103c", text_color="#00ffff", border_width=1, border_color="#00ffff")
-        if target_key == "maze" or target_key == "train":
+            self._menu_btns[key].configure(
+                fg_color="transparent", text_color=_SB_MUTED, border_width=0
+            )
+        self._pages[target_key].pack(fill="both", expand=True, padx=18, pady=18)
+        self._menu_btns[target_key].configure(
+            fg_color=_SB_ACTIVE, text_color=_SB_ACCENT,
+            border_width=1, border_color=_SB_CARD_B
+        )
+        if target_key in ("maze", "train"):
             self._redraw()
 
     # ══════════════════════════════════════════════════════════════
-    # 1. Pagină de Start (Home)
+    # 1. Home Page
     # ══════════════════════════════════════════════════════════════
 
     def _build_home_page(self, parent: ctk.CTkScrollableFrame) -> None:
-        header = ctk.CTkFrame(parent, fg_color="#0a0a1a", corner_radius=12, border_width=1, border_color="#1a103c")
-        header.pack(fill="x", pady=(0, 15))
-        
-        ctk.CTkLabel(header, text="PROIECT DILEMA / DISCIPLINĂ APLICATĂ", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00ffff").pack(anchor="w", padx=20, pady=(15, 2))
-        ctk.CTkLabel(header, text="Aplicație Autonomă de Navigație și Benchmark RL", font=ctk.CTkFont(size=24, weight="bold")).pack(anchor="w", padx=20, pady=(0, 5))
-        ctk.CTkLabel(header, text="Disciplina: Inteligență Artificială  |  Anul Universitar: 2026", font=ctk.CTkFont(size=14), text_color="gray60").pack(anchor="w", padx=20, pady=(0, 15))
+        # Hero banner
+        hero = _card(parent, border_color=_SB_CARD_B)
+        hero.pack(fill="x", pady=(0, 16))
 
-        team_section = ctk.CTkFrame(parent, fg_color="transparent")
-        team_section.pack(fill="x", pady=10)
-        
-        ctk.CTkLabel(team_section, text="Componența Echipei: Patanii", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ff007f").pack(anchor="w", pady=(0, 10))
-        cards_frame = ctk.CTkFrame(team_section, fg_color="transparent")
-        cards_frame.pack(fill="x")
-        
-        # --- CONFIGURARE MEMBRI ȘI FIȘIERE JPEG ---
+        badge = ctk.CTkFrame(hero, fg_color="#1d3f72", corner_radius=6)
+        badge.pack(anchor="w", padx=20, pady=(18, 6))
+        ctk.CTkLabel(
+            badge, text="  PROIECT DILEMA · INTELIGENȚĂ ARTIFICIALĂ 2026  ",
+            font=ctk.CTkFont(size=10, weight="bold"), text_color=_SB_ACCENT
+        ).pack(padx=4, pady=3)
+
+        ctk.CTkLabel(
+            hero, text="Autonomous Navigation &\nRL Benchmark Platform",
+            font=ctk.CTkFont(size=26, weight="bold"), text_color=_SB_TEXT, justify="left"
+        ).pack(anchor="w", padx=20, pady=(4, 4))
+        ctk.CTkLabel(
+            hero, text="Pioneer P3-DX · CoppeliaSim · Q-Learning / SARSA / Dyna-Q",
+            font=ctk.CTkFont(size=13), text_color=_SB_MUTED
+        ).pack(anchor="w", padx=20, pady=(0, 18))
+
+        # Team section
+        ctk.CTkLabel(
+            parent, text="TEAM MEMBERS",
+            font=ctk.CTkFont(size=10, weight="bold"), text_color=_SB_MUTED
+        ).pack(anchor="w", pady=(4, 8))
+
+        cards_row = ctk.CTkFrame(parent, fg_color="transparent")
+        cards_row.pack(fill="x")
+
         membri_detalii = [
-            {"nume": "Rusu Sebastian", "foto": "C:\\Users\\Sebastian\\Desktop\\IA_Echipa_Patanii-sim\\IA_Echipa_Patanii-sim\\RusuS.jpeg"},
-            {"nume": "Casciuc Stanislav", "foto": "C:\\Users\\Sebastian\\Desktop\\IA_Echipa_Patanii-sim\\IA_Echipa_Patanii-sim\\CasciucS.jpeg"},
-            {"nume": "Robu Gabriel", "foto": "C:\\Users\\Sebastian\\Desktop\\IA_Echipa_Patanii-sim\\IA_Echipa_Patanii-sim\\RobuG.jpeg"}
+            {"nume": "Rusu Sebastian",    "foto": "RusuS.jpeg"},
+            {"nume": "Casciuc Stanislav", "foto": "CasciucS.jpeg"},
+            {"nume": "Robu Gabriel",      "foto": "RobuG.jpeg"},
         ]
-        
-        for membru in membri_detalii:
-            nume = membru["nume"]
-            nume_foto = membru["foto"]
-            
-            # Creare card
-            card = ctk.CTkFrame(cards_frame, fg_color="#0a0a16", width=225, height=250, corner_radius=10, border_width=1, border_color="#1a103c")
-            card.pack(side="left", padx=(0, 15), pady=5)
+
+        for m in membri_detalii:
+            card = ctk.CTkFrame(
+                cards_row, width=210, height=240,
+                fg_color=_SB_CARD, corner_radius=12,
+                border_width=1, border_color=_SB_CARD_B
+            )
+            card.pack(side="left", padx=(0, 14), pady=4)
             card.pack_propagate(False)
-            
-            # Calea către imaginea din folderul config
-            img_path = _ROOT / "config" / nume_foto
-            loaded_img = False
-            
+
+            img_path = _ROOT / m["foto"]
+            loaded = False
             if _PIL_OK and img_path.exists():
                 try:
-                    img_obj = Image.open(img_path)
-                    
-                    # Decupare automată pătrată (crop central din PIL) pentru a preveni distorsiunea
-                    latime, inaltime = img_obj.size
-                    min_dim = min(latime, inaltime)
-                    img_obj = ImageOps.fit(img_obj, (min_dim, min_dim), Image.Resampling.LANCZOS)
-                    
-                    # Redimensionare la 130x130
-                    img_obj = img_obj.resize((130, 130), Image.Resampling.LANCZOS)
-                    
-                    ctk_img = ctk.CTkImage(light_image=img_obj, dark_image=img_obj, size=(130, 130))
-                    ctk.CTkLabel(card, image=ctk_img, text="").pack(pady=15)
-                    loaded_img = True
+                    img = Image.open(img_path)
+                    img = ImageOps.fit(img, (min(img.size), min(img.size)), Image.Resampling.LANCZOS)
+                    img = img.resize((120, 120), Image.Resampling.LANCZOS)
+                    ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(120, 120))
+                    avatar = ctk.CTkLabel(card, image=ctk_img, text="", corner_radius=60)
+                    avatar.pack(pady=(20, 8))
+                    loaded = True
                 except Exception:
                     pass
-            
-            # Avatar implicit dacă imaginea JPEG nu este găsită pe disc
-            if not loaded_img:
-                lbl_box = ctk.CTkFrame(card, width=130, height=130, fg_color="#161630", corner_radius=10)
-                lbl_box.pack(pady=15)
-                lbl_box.pack_propagate(False)
-                ctk.CTkLabel(lbl_box, text="👤", font=ctk.CTkFont(size=48)).pack(expand=True)
-                
-            # Detalii text
-            ctk.CTkLabel(card, text=nume, font=ctk.CTkFont(size=13, weight="bold"), wraplength=190).pack(pady=5)
-            ctk.CTkLabel(card, text="Developer / AI Research", font=ctk.CTkFont(size=11), text_color="gray50").pack()
-        
+
+            if not loaded:
+                av_box = ctk.CTkFrame(card, width=120, height=120, fg_color="#1a2d47", corner_radius=60)
+                av_box.pack(pady=(20, 8))
+                av_box.pack_propagate(False)
+                ctk.CTkLabel(av_box, text="👤", font=ctk.CTkFont(size=42)).pack(expand=True)
+
+            ctk.CTkLabel(
+                card, text=m["nume"],
+                font=ctk.CTkFont(size=13, weight="bold"), text_color=_SB_TEXT, wraplength=180
+            ).pack(pady=(0, 3))
+            ctk.CTkLabel(
+                card, text="AI Research / Developer",
+                font=ctk.CTkFont(size=10), text_color=_SB_MUTED
+            ).pack()
+
     # ══════════════════════════════════════════════════════════════
-    # 2. Pagină Documentație
+    # 2. Documentation Page
     # ══════════════════════════════════════════════════════════════
 
     def _build_doc_page(self, parent: ctk.CTkScrollableFrame) -> None:
-        f_robot = ctk.CTkFrame(parent, fg_color="#0a0a1a", corner_radius=12)
-        f_robot.pack(fill="x", pady=(0, 15))
-        ctk.CTkLabel(f_robot, text="🤖 Cum Funcționează Robotul (Virtual / Real)", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ff007f").pack(anchor="w", padx=20, pady=(15, 5))
-        desc_robot = (
-            "• Capabilități Senzoriale: Robotul utilizează un array circular format din 16 senzori independenți de proximitate.\n"
-            "• Control: Deplasarea autonomă este determinată cinemati prin ajustarea vitezei roților vL și vR.\n"
-            "• Scopul: Identificarea traseului minim și ocolirea barierelor dinamice din labirint până la destinație."
-        )
-        ctk.CTkLabel(f_robot, text=desc_robot, font=ctk.CTkFont(size=13), justify="left", wraplength=760, text_color="gray85").pack(anchor="w", padx=20, pady=(0, 15))
+        _page_header(parent, "Concepts & Algorithms", "Technical reference for robot and RL models")
 
-        f_ai = ctk.CTkFrame(parent, fg_color="#0a0a1a", corner_radius=12)
-        f_ai.pack(fill="x", pady=10)
-        ctk.CTkLabel(f_ai, text="🧠 Arhitectura Inteligenței Artificiale (Algoritmi RL)", font=ctk.CTkFont(size=16, weight="bold"), text_color="#00ffff").pack(anchor="w", padx=20, pady=(15, 5))
-        desc_ai = (
-            "Platforma integrează 4 abordări majore din Reinforcement Learning:\n"
-            "1. Q-Learning (Off-Policy Temporal Difference)\n"
-            "2. SARSA (On-Policy State-Action-Reward-State-Action)\n"
-            "3. Expected SARSA (Actualizare stabilă prin calculul valorii medii a acțiunilor viitoare)\n"
-            "4. Dyna-Q (Combină învățarea directă din mediu cu generarea de episoade imaginate pentru planificare rapidă)"
-        )
-        ctk.CTkLabel(f_ai, text=desc_ai, font=ctk.CTkFont(size=13), justify="left", wraplength=760, text_color="gray85").pack(anchor="w", padx=20, pady=(0, 15))
+        sections = [
+            (
+                "🤖  Robot Capabilities",
+                _SB_ACCENT,
+                "The Pioneer P3-DX robot uses a circular array of 16 independent ultrasonic proximity sensors.\n"
+                "Autonomous movement is determined kinematically by adjusting wheel velocities vL and vR.\n"
+                "Objective: identify the shortest path and avoid dynamic obstacles until reaching the goal."
+            ),
+            (
+                "🧠  Reinforcement Learning Architecture",
+                _SB_ACCENT2,
+                "Four major RL approaches are integrated:\n"
+                "  1.  Q-Learning  —  Off-policy temporal difference (greedy target)\n"
+                "  2.  SARSA  —  On-policy TD (follows current policy)\n"
+                "  3.  Expected SARSA  —  Stable update via expected value over actions\n"
+                "  4.  Dyna-Q  —  Combines direct env learning with simulated planning steps"
+            ),
+            (
+                "⚙️  State & Action Space",
+                _SB_PURPLE,
+                "State: 3 sensor zones (front, left, right) each bucketed into 3 distance ranges → 27 discrete states.\n"
+                "Actions: FORWARD, CURVE_LEFT, CURVE_RIGHT, TURN_LEFT, TURN_RIGHT, BACK_UP.\n"
+                "Exploration: ε-greedy with exponential decay. Stuck detection triggers forced recovery maneuvers."
+            ),
+        ]
+
+        for title, color, body in sections:
+            card = _card(parent, border_color=_SB_CARD_B)
+            card.pack(fill="x", pady=(0, 12))
+            ctk.CTkLabel(
+                card, text=title, font=ctk.CTkFont(size=15, weight="bold"), text_color=color
+            ).pack(anchor="w", padx=20, pady=(16, 6))
+            ctk.CTkLabel(
+                card, text=body, font=ctk.CTkFont(size=13),
+                justify="left", wraplength=780, text_color=_SB_TEXT
+            ).pack(anchor="w", padx=20, pady=(0, 16))
 
     # ══════════════════════════════════════════════════════════════
-    # 3. Pagină Labirint Vizual Redesenat (Aspect Neon Cyberpunk)
+    # 3. Maze Editor Page
     # ══════════════════════════════════════════════════════════════
 
     def _build_maze_page(self, parent: ctk.CTkFrame) -> None:
-        # Control Sidebar pentru Editor stânga
-        left_ctrl = ctk.CTkFrame(parent, width=280, fg_color="#0a0a16", border_width=1, border_color="#1a103c")
-        left_ctrl.pack(side="left", fill="y", padx=(0, 10), pady=5)
-        left_ctrl.pack_propagate(False)
+        # Left control panel
+        ctrl = ctk.CTkFrame(parent, width=270, fg_color=_SB_CARD, corner_radius=10, border_width=1, border_color=_SB_CARD_B)
+        ctrl.pack(side="left", fill="y", padx=(0, 12), pady=0)
+        ctrl.pack_propagate(False)
 
-        # ── Secțiunea 1: Dimensiune Grid ──────────────────────────────
-        ctk.CTkLabel(left_ctrl, text="Dimensiune Grid", font=ctk.CTkFont(weight="bold", size=14), text_color="#00ffff").pack(anchor="w", padx=15, pady=(15, 4))
-        
-        r_box = ctk.CTkFrame(left_ctrl, fg_color="transparent")
-        r_box.pack(fill="x", padx=15, pady=2)
-        ctk.CTkLabel(r_box, text="Rânduri:", width=80, anchor="w").pack(side="left")
-        ctk.CTkEntry(r_box, textvariable=self._rows_var, width=70).pack(side="left")
+        _section_label(ctrl, "GRID SIZE")
 
-        c_box = ctk.CTkFrame(left_ctrl, fg_color="transparent")
-        c_box.pack(fill="x", padx=15, pady=2)
-        ctk.CTkLabel(c_box, text="Coloane:", width=80, anchor="w").pack(side="left")
-        ctk.CTkEntry(c_box, textvariable=self._cols_var, width=70).pack(side="left")
-        
-        ctk.CTkButton(left_ctrl, text="Aplică Dimensiune", command=self._on_resize, fg_color="#1a103c", border_width=1, border_color="#00ffff").pack(fill="x", padx=15, pady=8)
+        r_box = ctk.CTkFrame(ctrl, fg_color="transparent")
+        r_box.pack(fill="x", padx=14, pady=2)
+        ctk.CTkLabel(r_box, text="Rows", width=64, anchor="w", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left")
+        ctk.CTkEntry(r_box, textvariable=self._rows_var, width=72, fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left")
 
-        _sep(left_ctrl)
+        c_box = ctk.CTkFrame(ctrl, fg_color="transparent")
+        c_box.pack(fill="x", padx=14, pady=2)
+        ctk.CTkLabel(c_box, text="Cols", width=64, anchor="w", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left")
+        ctk.CTkEntry(c_box, textvariable=self._cols_var, width=72, fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left")
 
-        # ── Secțiunea 2: Noduri Start / Goal ───────────────────────────
-        ctk.CTkLabel(left_ctrl, text="Noduri Start / Goal", font=ctk.CTkFont(weight="bold", size=13), text_color="#ff007f").pack(anchor="w", padx=15, pady=(4, 2))
-        
-        sg1 = ctk.CTkFrame(left_ctrl, fg_color="transparent")
-        sg1.pack(fill="x", padx=15, pady=2)
-        ctk.CTkLabel(sg1, text="Start R:", width=50).pack(side="left")
-        self._start_r = ctk.CTkEntry(sg1, width=45)
+        _primary_btn(ctrl, "Apply Size", self._on_resize).pack(fill="x", padx=14, pady=(6, 2))
+
+        _divider(ctrl)
+        _section_label(ctrl, "START / GOAL NODES")
+
+        sg1 = ctk.CTkFrame(ctrl, fg_color="transparent")
+        sg1.pack(fill="x", padx=14, pady=2)
+        ctk.CTkLabel(sg1, text="Start R:", width=58, anchor="w", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left")
+        self._start_r = ctk.CTkEntry(sg1, width=46, fg_color="#0d1929", border_color=_SB_CARD_B)
         self._start_r.insert(0, "0")
         self._start_r.pack(side="left", padx=2)
-        ctk.CTkLabel(sg1, text="C:").pack(side="left", padx=2)
-        self._start_c = ctk.CTkEntry(sg1, width=45)
+        ctk.CTkLabel(sg1, text="C:", text_color=_SB_MUTED).pack(side="left", padx=2)
+        self._start_c = ctk.CTkEntry(sg1, width=46, fg_color="#0d1929", border_color=_SB_CARD_B)
         self._start_c.insert(0, "0")
         self._start_c.pack(side="left")
 
-        sg2 = ctk.CTkFrame(left_ctrl, fg_color="transparent")
-        sg2.pack(fill="x", padx=15, pady=2)
-        ctk.CTkLabel(sg2, text="Goal R:", width=50).pack(side="left")
-        self._goal_r = ctk.CTkEntry(sg2, width=45)
+        sg2 = ctk.CTkFrame(ctrl, fg_color="transparent")
+        sg2.pack(fill="x", padx=14, pady=2)
+        ctk.CTkLabel(sg2, text="Goal R:", width=58, anchor="w", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left")
+        self._goal_r = ctk.CTkEntry(sg2, width=46, fg_color="#0d1929", border_color=_SB_CARD_B)
         self._goal_r.insert(0, "6")
         self._goal_r.pack(side="left", padx=2)
-        ctk.CTkLabel(sg2, text="C:").pack(side="left", padx=2)
-        self._goal_c = ctk.CTkEntry(sg2, width=45)
+        ctk.CTkLabel(sg2, text="C:", text_color=_SB_MUTED).pack(side="left", padx=2)
+        self._goal_c = ctk.CTkEntry(sg2, width=46, fg_color="#0d1929", border_color=_SB_CARD_B)
         self._goal_c.insert(0, "6")
         self._goal_c.pack(side="left")
 
-        ctk.CTkButton(left_ctrl, text="Setează Start/Goal", command=self._on_set_start_goal, fg_color="#1a103c").pack(fill="x", padx=15, pady=6)
+        _primary_btn(ctrl, "Set Start / Goal", self._on_set_start_goal, color=_SB_ACCENT2).pack(fill="x", padx=14, pady=(6, 2))
 
-        _sep(left_ctrl)
+        _divider(ctrl)
+        _section_label(ctrl, "GENERATION")
 
-        # ── Secțiunea 3: Instrumente Labirint (Noua Configurație) ──
-        ctk.CTkLabel(left_ctrl, text="Instrumente Labirint", font=ctk.CTkFont(weight="bold", size=13), text_color="#00ffff").pack(anchor="w", padx=15, pady=(4, 2))
-        
-        # Meniu Dropdown pentru selectarea modului de generare
         self._gen_type_var = ctk.StringVar(value="Perfect (DFS)")
-        self._gen_type_cb = ctk.CTkComboBox(left_ctrl, values=["Perfect (DFS)", "Aleatoriu (Densitate)"], variable=self._gen_type_var)
-        self._gen_type_cb.pack(fill="x", padx=15, pady=3)
-        
-        # Slider dedicat pentru controlul densității în cazul modului aleatoriu
-        density_frame = ctk.CTkFrame(left_ctrl, fg_color="transparent")
-        density_frame.pack(fill="x", padx=15, pady=2)
-        ctk.CTkLabel(density_frame, text="Densitate:", width=65, anchor="w", font=ctk.CTkFont(size=12)).pack(side="left")
-        self._density_slider = ctk.CTkSlider(density_frame, from_=0.1, to=0.6, number_of_steps=10)
+        ctk.CTkComboBox(
+            ctrl, values=["Perfect (DFS)", "Random (Density)"],
+            variable=self._gen_type_var,
+            fg_color="#0d1929", border_color=_SB_CARD_B,
+            button_color=_SB_ACCENT, dropdown_fg_color=_SB_CARD
+        ).pack(fill="x", padx=14, pady=3)
+
+        d_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        d_row.pack(fill="x", padx=14, pady=2)
+        ctk.CTkLabel(d_row, text="Density", width=60, anchor="w", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left")
+        self._density_slider = ctk.CTkSlider(d_row, from_=0.1, to=0.6, number_of_steps=10, button_color=_SB_ACCENT, progress_color=_SB_ACCENT)
         self._density_slider.set(0.25)
         self._density_slider.pack(side="left", fill="x", expand=True)
 
-        ctk.CTkButton(left_ctrl, text="Generează Labirint", command=self._on_generate, fg_color="#1f6aa5", font=ctk.CTkFont(weight="bold")).pack(fill="x", padx=15, pady=5)
-        ctk.CTkButton(left_ctrl, text="Șterge Toți Pereții", command=self._on_clear_walls, fg_color="#333344").pack(fill="x", padx=15, pady=3)
+        _primary_btn(ctrl, "Generate Maze", self._on_generate).pack(fill="x", padx=14, pady=(6, 2))
+        _ghost_btn(ctrl, "Clear All Walls", self._on_clear_walls).pack(fill="x", padx=14, pady=2)
 
-        _sep(left_ctrl)
+        _divider(ctrl)
+        _section_label(ctrl, "PRESETS")
 
-        # ── Secțiunea 4: Salvare / Încărcare Presets ───────────────────
-        ctk.CTkLabel(left_ctrl, text="Salvare Presets", font=ctk.CTkFont(weight="bold", size=13)).pack(anchor="w", padx=15, pady=2)
-        self._preset_cb = ctk.CTkComboBox(left_ctrl, command=self._on_load_preset)
-        self._preset_cb.pack(fill="x", padx=15, pady=3)
-        ctk.CTkButton(left_ctrl, text="Salvează Preset", command=self._on_save_preset, fg_color="#2e6f40").pack(fill="x", padx=15, pady=3)
+        self._preset_cb = ctk.CTkComboBox(
+            ctrl, command=self._on_load_preset,
+            fg_color="#0d1929", border_color=_SB_CARD_B,
+            button_color=_SB_ACCENT, dropdown_fg_color=_SB_CARD
+        )
+        self._preset_cb.pack(fill="x", padx=14, pady=3)
+        _primary_btn(ctrl, "Save Preset", self._on_save_preset, color="#1a6b3c").pack(fill="x", padx=14, pady=2)
 
-        # ── Zona Canvas-ului Centrală (Design Neon Cyberpunk) ───────────
-        center_canvas = ctk.CTkFrame(parent, fg_color="#030308")
-        center_canvas.pack(side="left", fill="both", expand=True, pady=5)
-        
-        info_hint = ctk.CTkLabel(center_canvas, text="💡 Click stânga: Adaugă/Șterge Pereți | Click dreapta în celulă: Mută Start/Goal", font=ctk.CTkFont(size=11), text_color="gray50")
-        info_hint.pack(pady=4)
+        # Canvas area
+        canvas_frame = ctk.CTkFrame(parent, fg_color=_SB_CARD, corner_radius=10, border_width=1, border_color=_SB_CARD_B)
+        canvas_frame.pack(side="left", fill="both", expand=True)
 
-        self._canvas = tk.Canvas(center_canvas, bg=_C_BG, highlightthickness=1, highlightbackground="#1a103c")
-        self._canvas.pack(fill="both", expand=True, padx=15, pady=15)
+        hint_bar = ctk.CTkFrame(canvas_frame, fg_color="transparent")
+        hint_bar.pack(fill="x", padx=14, pady=(10, 4))
+        ctk.CTkLabel(
+            hint_bar,
+            text="Left-click: Toggle Wall  ·  Right-click on cell: Move Start/Goal",
+            font=ctk.CTkFont(size=11), text_color=_SB_MUTED
+        ).pack(side="left")
+
+        self._canvas = tk.Canvas(canvas_frame, bg=_C_BG, highlightthickness=1, highlightbackground=_SB_CARD_B)
+        self._canvas.pack(fill="both", expand=True, padx=14, pady=(0, 14))
         self._canvas.bind("<Configure>", lambda _: self._redraw())
         self._canvas.bind("<Button-1>", self._on_canvas_left)
         self._canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self._canvas.bind("<Button-3>", self._on_canvas_right)
 
     # ══════════════════════════════════════════════════════════════
-    # 4. Pagină de Antrenare Instanță Unică
+    # 4. Training Page
     # ══════════════════════════════════════════════════════════════
 
     def _build_train_page(self, parent: ctk.CTkFrame) -> None:
-        left_p = ctk.CTkFrame(parent, width=340, fg_color="#0a0a16", border_width=1, border_color="#1a103c")
-        left_p.pack(side="left", fill="y", padx=(0, 10), pady=5)
-        left_p.pack_propagate(False)
+        left = ctk.CTkFrame(parent, width=320, fg_color=_SB_CARD, corner_radius=10, border_width=1, border_color=_SB_CARD_B)
+        left.pack(side="left", fill="y", padx=(0, 12), pady=0)
+        left.pack_propagate(False)
 
-        ctk.CTkLabel(left_p, text="Selectare Algoritm", font=ctk.CTkFont(size=14, weight="bold"), text_color="#00ffff").pack(anchor="w", padx=15, pady=(15, 5))
+        _section_label(left, "ALGORITHM")
         self._algo_var = ctk.StringVar(value="Q-learning")
-        self._algo_selector = ctk.CTkOptionMenu(left_p, values=["Q-learning", "SARSA", "Expected SARSA", "Dyna-Q"], variable=self._algo_var)
-        self._algo_selector.pack(fill="x", padx=15, pady=5)
+        self._algo_selector = ctk.CTkOptionMenu(
+            left, values=["Q-learning", "SARSA", "Expected SARSA", "Dyna-Q"],
+            variable=self._algo_var,
+            fg_color=_SB_ACCENT, button_color="#2563eb",
+            dropdown_fg_color=_SB_CARD, font=ctk.CTkFont(size=13, weight="bold")
+        )
+        self._algo_selector.pack(fill="x", padx=14, pady=(4, 8))
 
-        self._params_frame = ctk.CTkScrollableFrame(left_p, label_text="Hiperparametri Model", fg_color="transparent")
-        self._params_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        _divider(left)
+        self._params_frame = ctk.CTkScrollableFrame(
+            left, label_text="Hyperparameters",
+            fg_color="transparent",
+            label_text_color=_SB_MUTED, label_font=ctk.CTkFont(size=10, weight="bold")
+        )
+        self._params_frame.pack(fill="both", expand=True, padx=8, pady=6)
         self._param_sliders: dict[str, ctk.CTkSlider] = {}
         self._param_val_lbls: dict[str, ctk.CTkLabel] = {}
         self._rebuild_learning_params()
 
-        right_p = ctk.CTkFrame(parent, fg_color="#050510")
-        right_p.pack(side="left", fill="both", expand=True, pady=5)
+        # Right side
+        right = ctk.CTkFrame(parent, fg_color="transparent")
+        right.pack(side="left", fill="both", expand=True)
 
-        ctk.CTkLabel(right_p, text="Simulare Interfață Virtuală", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ff007f").pack(anchor="w", padx=20, pady=15)
-        
-        box_sim = ctk.CTkFrame(right_p, fg_color="#0c0c20")
-        box_sim.pack(fill="x", padx=20, pady=10)
-        csz = ctk.CTkFrame(box_sim, fg_color="transparent")
-        csz.pack(fill="x", padx=15, pady=10)
-        ctk.CTkLabel(csz, text="Dimensiune Celulă Simulare (m):").pack(side="left")
-        self._cell_m = ctk.CTkEntry(csz, width=70)
+        # Simulator sync card
+        sim_card = _card(right, border_color=_SB_CARD_B)
+        sim_card.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkLabel(
+            sim_card, text="CoppeliaSim Scene",
+            font=ctk.CTkFont(size=14, weight="bold"), text_color=_SB_ACCENT
+        ).pack(anchor="w", padx=18, pady=(14, 8))
+
+        sz_row = ctk.CTkFrame(sim_card, fg_color="transparent")
+        sz_row.pack(fill="x", padx=18, pady=(0, 8))
+        ctk.CTkLabel(sz_row, text="Cell size (m):", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left")
+        self._cell_m = ctk.CTkEntry(sz_row, width=72, fg_color="#0d1929", border_color=_SB_CARD_B)
         self._cell_m.insert(0, "0.5")
         self._cell_m.pack(side="left", padx=10)
 
-        ctk.CTkButton(box_sim, text="Sincronizează Labirintul în CoppeliaSim", fg_color="#1f6aa5", height=38, command=self._on_apply_maze).pack(fill="x", padx=15, pady=5)
-        ctk.CTkButton(box_sim, text="Golește Scena CoppeliaSim", fg_color="#444", height=34, command=self._on_clear_scene).pack(fill="x", padx=15, pady=(5, 15))
+        btn_row = ctk.CTkFrame(sim_card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=18, pady=(0, 14))
+        _primary_btn(btn_row, "Sync Maze → CoppeliaSim", self._on_apply_maze).pack(side="left", fill="x", expand=True, padx=(0, 6))
+        _ghost_btn(btn_row, "Clear Scene", self._on_clear_scene).pack(side="left")
 
-        box_exec = ctk.CTkFrame(right_p, fg_color="#0c0c20")
-        box_exec.pack(fill="both", expand=True, padx=20, pady=(10, 15))
-        ctk.CTkLabel(box_exec, text="Execuție Instanță Controler", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=15, pady=10)
-        
-        ctrl_b = ctk.CTkFrame(box_exec, fg_color="transparent")
-        ctrl_b.pack(fill="x", padx=15, pady=5)
-        self._start_btn = ctk.CTkButton(ctrl_b, text="▶  Pornește Antrenare", fg_color="#2e6f40", height=42, command=self._on_start_beh)
-        self._start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self._stop_btn = ctk.CTkButton(ctrl_b, text="■  Stop", fg_color="#7a2020", height=42, state="disabled", command=self._on_stop_beh)
-        self._stop_btn.pack(side="left", padx=5)
+        # Execution card
+        exec_card = _card(right, border_color=_SB_CARD_B)
+        exec_card.pack(fill="both", expand=True)
 
-        self._beh_status = ctk.CTkLabel(box_exec, text="Status Agent: Inactiv", font=ctk.CTkFont(size=13, weight="bold"), anchor="w")
-        self._beh_status.pack(fill="x", padx=18, pady=5)
-        self._vel_lbl = ctk.CTkLabel(box_exec, text="Viteze Motoare: vL = 0.00 | vR = 0.00", font=ctk.CTkFont(family="Courier", size=13), anchor="w")
-        self._vel_lbl.pack(fill="x", padx=18, pady=5)
+        ctk.CTkLabel(
+            exec_card, text="Agent Execution",
+            font=ctk.CTkFont(size=14, weight="bold"), text_color=_SB_ACCENT
+        ).pack(anchor="w", padx=18, pady=(14, 8))
+
+        ctrl_row = ctk.CTkFrame(exec_card, fg_color="transparent")
+        ctrl_row.pack(fill="x", padx=18, pady=(0, 10))
+        self._start_btn = ctk.CTkButton(
+            ctrl_row, text="▶  Start Training",
+            fg_color="#166534", hover_color="#15803d",
+            font=ctk.CTkFont(size=14, weight="bold"), height=44, corner_radius=8,
+            command=self._on_start_beh
+        )
+        self._start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._stop_btn = ctk.CTkButton(
+            ctrl_row, text="■  Stop",
+            fg_color="#7f1d1d", hover_color="#991b1b",
+            font=ctk.CTkFont(size=14, weight="bold"), height=44, corner_radius=8,
+            state="disabled", command=self._on_stop_beh
+        )
+        self._stop_btn.pack(side="left")
+
+        status_card = ctk.CTkFrame(exec_card, fg_color="#0d1929", corner_radius=8)
+        status_card.pack(fill="x", padx=18, pady=(0, 14))
+        self._beh_status = ctk.CTkLabel(
+            status_card, text="Agent Status: Idle",
+            font=ctk.CTkFont(size=12, weight="bold"), anchor="w", text_color=_SB_ACCENT2
+        )
+        self._beh_status.pack(fill="x", padx=12, pady=(8, 4))
+        self._vel_lbl = ctk.CTkLabel(
+            status_card, text="Motors: vL = 0.00  ·  vR = 0.00",
+            font=ctk.CTkFont(family="Courier", size=12), anchor="w", text_color=_SB_MUTED
+        )
+        self._vel_lbl.pack(fill="x", padx=12, pady=(0, 8))
 
     # ══════════════════════════════════════════════════════════════
-    # 5. TAB NOU SEPARAT: Modul Benchmarking Multi-Algoritm
+    # 5. Benchmark Page
     # ══════════════════════════════════════════════════════════════
 
     def _build_bench_page(self, parent: ctk.CTkFrame) -> None:
-        # Layout complet pentru Tabul de Benchmark solicitat separat
-        top_bar = ctk.CTkFrame(parent, fg_color="#0a0a1a", border_width=1, border_color="#1a103c")
-        top_bar.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkLabel(top_bar, text="📊 Evaluare Comparativă și Benchmarking Algoritmi", font=ctk.CTkFont(size=16, weight="bold"), text_color="#00ffff").pack(side="left", padx=15, pady=15)
-        
-        param_b = ctk.CTkFrame(top_bar, fg_color="transparent")
-        param_b.pack(side="right", padx=15, pady=10)
-        ctk.CTkLabel(param_b, text="Episoade per Model: ", font=ctk.CTkFont(size=13)).pack(side="left")
-        ctk.CTkEntry(param_b, textvariable=self._exp_episodes, width=70).pack(side="left", padx=5)
-        
-        self._btn_bench = ctk.CTkButton(param_b, text="⚡ Lansează Benchmark Complet", fg_color="#ff007f", font=ctk.CTkFont(weight="bold"), command=self._on_run_compare)
-        self._btn_bench.pack(side="left", padx=10)
+        # Top bar
+        top = _card(parent, border_color=_SB_CARD_B)
+        top.pack(fill="x", pady=(0, 12))
 
-        # Zona centrală de afișare log performanțe
-        body = ctk.CTkFrame(parent, fg_color="#05050f")
-        body.pack(fill="both", expand=True)
-        
-        lbl_info = ctk.CTkLabel(body, text="Rezultatele rulării comparative (Q-Learning vs SARSA vs Expected SARSA vs Dyna-Q):", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray50")
-        lbl_info.pack(anchor="w", padx=15, pady=(10, 5))
-        
-        self._exp_output = ctk.CTkTextbox(body, fg_color="#020206", font=ctk.CTkFont(family="Courier", size=12), state="disabled", border_width=1, border_color="#1a103c")
-        self._exp_output.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        left_top = ctk.CTkFrame(top, fg_color="transparent")
+        left_top.pack(side="left", fill="y", padx=16, pady=12)
+        ctk.CTkLabel(
+            left_top, text="Multi-Model Benchmark",
+            font=ctk.CTkFont(size=17, weight="bold"), text_color=_SB_TEXT
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            left_top, text="Q-Learning vs SARSA vs Expected SARSA vs Dyna-Q",
+            font=ctk.CTkFont(size=11), text_color=_SB_MUTED
+        ).pack(anchor="w")
+
+        right_top = ctk.CTkFrame(top, fg_color="transparent")
+        right_top.pack(side="right", padx=16, pady=12)
+        ctk.CTkLabel(right_top, text="Episodes per Model:", text_color=_SB_MUTED, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 6))
+        ctk.CTkEntry(right_top, textvariable=self._exp_episodes, width=72, fg_color="#0d1929", border_color=_SB_CARD_B).pack(side="left", padx=(0, 10))
+        self._btn_bench = ctk.CTkButton(
+            right_top, text="⚡  Run Full Benchmark",
+            fg_color=_SB_WARN, hover_color="#d97706", text_color="#0f1923",
+            font=ctk.CTkFont(size=13, weight="bold"), height=36,
+            command=self._on_run_compare
+        )
+        self._btn_bench.pack(side="left")
+
+        # Output box
+        output_card = _card(parent, border_color=_SB_CARD_B)
+        output_card.pack(fill="both", expand=True)
+
+        ctk.CTkLabel(
+            output_card, text="BENCHMARK OUTPUT",
+            font=ctk.CTkFont(size=9, weight="bold"), text_color=_SB_MUTED
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        self._exp_output = ctk.CTkTextbox(
+            output_card,
+            fg_color="#080f1d",
+            font=ctk.CTkFont(family="Courier", size=12),
+            text_color=_SB_ACCENT2,
+            state="disabled",
+            border_width=1, border_color=_SB_CARD_B,
+            corner_radius=8
+        )
+        self._exp_output.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
     # ══════════════════════════════════════════════════════════════
-    # 6. Pagină Monitorizare Senzori & Loguri
+    # 6. Monitor Page
     # ══════════════════════════════════════════════════════════════
 
     def _build_monitor_page(self, parent: ctk.CTkFrame) -> None:
-        f_sens = ctk.CTkFrame(parent, fg_color="#0a0a16")
-        f_sens.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        
-        top_s = ctk.CTkFrame(f_sens, fg_color="transparent")
-        top_s.pack(fill="x", padx=10, pady=8)
-        ctk.CTkLabel(top_s, text="Senzori Circular-Ultrasonici (16 Canale)", font=ctk.CTkFont(weight="bold")).pack(side="left")
-        self._auto_refresh = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(top_s, text="Live", variable=self._auto_refresh, width=60).pack(side="right", padx=5)
-        self._pos_lbl = ctk.CTkLabel(top_s, text="Poziție: X=— Y=—")
-        self._pos_lbl.pack(side="right", padx=10)
+        # Sensor panel
+        sens_card = _card(parent, border_color=_SB_CARD_B)
+        sens_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
-        scroll_s = ctk.CTkScrollableFrame(f_sens, fg_color="transparent")
-        scroll_s.pack(fill="both", expand=True, padx=5, pady=2)
-        
+        top_s = ctk.CTkFrame(sens_card, fg_color="transparent")
+        top_s.pack(fill="x", padx=14, pady=(12, 6))
+        ctk.CTkLabel(
+            top_s, text="Ultrasonic Array (16 channels)",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=_SB_TEXT
+        ).pack(side="left")
+        self._auto_refresh = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            top_s, text="Live", variable=self._auto_refresh, width=60,
+            checkmark_color=_SB_ACCENT2, fg_color=_SB_ACCENT
+        ).pack(side="right", padx=5)
+        self._pos_lbl = ctk.CTkLabel(top_s, text="Pos: X=—  Y=—", text_color=_SB_MUTED, font=ctk.CTkFont(size=11))
+        self._pos_lbl.pack(side="right", padx=12)
+
+        scroll_s = ctk.CTkScrollableFrame(sens_card, fg_color="transparent")
+        scroll_s.pack(fill="both", expand=True, padx=8, pady=4)
+
         self._sbars: list[ctk.CTkProgressBar] = []
         self._sdist: list[ctk.CTkLabel] = []
         for i, lbl in enumerate(SENSOR_LABELS):
             row = ctk.CTkFrame(scroll_s, fg_color="transparent")
             row.pack(fill="x", pady=2)
-            ctk.CTkLabel(row, text=f"[{i:02d}] {lbl}", width=140, anchor="w", font=ctk.CTkFont(family="Courier", size=11)).pack(side="left", padx=2)
-            bar = ctk.CTkProgressBar(row, width=150, progress_color="#00ffff")
+            ctk.CTkLabel(
+                row, text=f"[{i:02d}] {lbl}", width=144, anchor="w",
+                font=ctk.CTkFont(family="Courier", size=11), text_color=_SB_MUTED
+            ).pack(side="left", padx=2)
+            bar = ctk.CTkProgressBar(row, width=150, progress_color=_SB_ACCENT, fg_color="#1a2d47")
             bar.set(0)
             bar.pack(side="left", padx=4)
-            dl = ctk.CTkLabel(row, text="---", width=60, anchor="w", font=ctk.CTkFont(family="Courier"))
+            dl = ctk.CTkLabel(row, text="---", width=62, anchor="w", font=ctk.CTkFont(family="Courier", size=11), text_color=_SB_TEXT)
             dl.pack(side="left", padx=2)
             self._sbars.append(bar)
             self._sdist.append(dl)
 
-        f_log = ctk.CTkFrame(parent, width=420, fg_color="#0a0a16")
-        f_log.pack(side="right", fill="y", padx=(5, 0))
-        f_log.pack_propagate(False)
-        ctk.CTkLabel(f_log, text="Jurnal Evenimente Sistem (Log)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
-        self._log_box = ctk.CTkTextbox(f_log, font=ctk.CTkFont(family="Courier", size=11), state="disabled", fg_color="#030308")
-        self._log_box.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        # Log panel
+        log_card = ctk.CTkFrame(parent, width=400, fg_color=_SB_CARD, corner_radius=10, border_width=1, border_color=_SB_CARD_B)
+        log_card.pack(side="right", fill="y")
+        log_card.pack_propagate(False)
+
+        ctk.CTkLabel(
+            log_card, text="SYSTEM LOG",
+            font=ctk.CTkFont(size=9, weight="bold"), text_color=_SB_MUTED
+        ).pack(anchor="w", padx=14, pady=(12, 4))
+
+        self._log_box = ctk.CTkTextbox(
+            log_card,
+            font=ctk.CTkFont(family="Courier", size=11),
+            state="disabled",
+            fg_color="#080f1d",
+            text_color=_SB_ACCENT2,
+            border_width=1, border_color=_SB_CARD_B
+        )
+        self._log_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
     # ══════════════════════════════════════════════════════════════
-    # Logica de Redesenare și Click-uri (Corectată și Stilizată Neon)
+    # Maze drawing & interaction
     # ══════════════════════════════════════════════════════════════
 
     def _cell_px(self, canvas: tk.Canvas) -> float:
@@ -520,49 +683,44 @@ class App(ctk.CTk):
         rows, cols = self._maze.rows, self._maze.cols
         m = self._maze
 
-        # 1. Desenare celule interioare cu rețea fină Cyberpunk
         for r in range(rows):
             for c in range(cols):
                 x0 = ox + c * cp
                 y0 = oy + r * cp
-                canvas.create_rectangle(x0, y0, x0 + cp, y0 + cp, fill=_C_CELL, outline="#111126")
+                canvas.create_rectangle(x0, y0, x0 + cp, y0 + cp, fill=_C_CELL, outline="#0f1f35")
 
-        # 2. Desenare noduri speciale Start și Goal
         sr, sc = m.start
         gr, gc = m.goal
         _draw_marker(canvas, ox + sc * cp + cp / 2, oy + sr * cp + cp / 2, cp * 0.35, _C_START, "S")
         _draw_marker(canvas, ox + gc * cp + cp / 2, oy + gr * cp + cp / 2, cp * 0.35, _C_GOAL, "G")
 
-        # 3. Desenare pereți Orizontali
         for r in range(rows + 1):
             for c in range(cols):
                 if m.h_walls[r][c]:
                     is_b = m.is_boundary_h(r)
                     color = _C_BOUNDARY if is_b else _C_WALL
-                    w = 4 if is_b else 3
+                    w = 4 if is_b else 2
                     x0 = ox + c * cp
                     y0 = oy + r * cp
                     canvas.create_line(x0, y0, x0 + cp, y0, fill=color, width=w)
 
-        # 4. Desenare pereți Verticali
         for r in range(rows):
             for c in range(cols + 1):
                 if m.v_walls[r][c]:
                     is_b = m.is_boundary_v(c)
                     color = _C_BOUNDARY if is_b else _C_WALL
-                    w = 4 if is_b else 3
+                    w = 4 if is_b else 2
                     x0 = ox + c * cp
                     y0 = oy + r * cp
                     canvas.create_line(x0, y0, x0, y0 + cp, fill=color, width=w)
 
-        # 5. Randare poziție Live robot pe grilă
         if robot_pos:
             rr, rc = robot_pos
             if 0 <= rr < rows and 0 <= rc < cols:
                 rad = max(5, cp * 0.28)
-                canvas.create_oval(ox + rc * cp + cp / 2 - rad, oy + rr * cp + cp / 2 - rad,
-                                   ox + rc * cp + cp / 2 + rad, oy + rr * cp + cp / 2 + rad,
-                                   fill=_C_ROBOT, outline="white", width=1)
+                cx = ox + rc * cp + cp / 2
+                cy = oy + rr * cp + cp / 2
+                canvas.create_oval(cx - rad, cy - rad, cx + rad, cy + rad, fill=_C_ROBOT, outline="white", width=1)
 
     def _hit_wall(self, x: float, y: float) -> tuple[str, int, int] | None:
         cp = self._cell_px(self._canvas)
@@ -592,7 +750,8 @@ class App(ctk.CTk):
 
     def _on_canvas_left(self, event: tk.Event) -> None:
         hit = self._hit_wall(event.x, event.y)
-        if not hit: return
+        if not hit:
+            return
         wtype, wr, wc = hit
         if wtype == "h":
             self._maze.toggle_h_wall(wr, wc)
@@ -603,7 +762,8 @@ class App(ctk.CTk):
 
     def _on_canvas_drag(self, event: tk.Event) -> None:
         hit = self._hit_wall(event.x, event.y)
-        if not hit or hit == self._last_toggled: return
+        if not hit or hit == getattr(self, "_last_toggled", None):
+            return
         wtype, wr, wc = hit
         if wtype == "h":
             self._maze.toggle_h_wall(wr, wc)
@@ -617,7 +777,8 @@ class App(ctk.CTk):
         ox, oy = self._maze_origin(self._canvas)
         c = int((event.x - ox) / cp)
         r = int((event.y - oy) / cp)
-        if not (0 <= r < self._maze.rows and 0 <= c < self._maze.cols): return
+        if not (0 <= r < self._maze.rows and 0 <= c < self._maze.cols):
+            return
         if (r, c) == self._maze.start:
             self._maze.start = self._maze.goal
             self._maze.goal = (r, c)
@@ -636,7 +797,8 @@ class App(ctk.CTk):
         try:
             rows = int(self._rows_var.get())
             cols = int(self._cols_var.get())
-        except ValueError: return
+        except ValueError:
+            return
         rows = _clamp(rows, 2, 25)
         cols = _clamp(cols, 2, 25)
         self._maze = GridMaze(rows, cols)
@@ -653,7 +815,8 @@ class App(ctk.CTk):
             sc = _clamp(int(self._start_c.get()), 0, self._maze.cols - 1)
             gr = _clamp(int(self._goal_r.get()),  0, self._maze.rows - 1)
             gc = _clamp(int(self._goal_c.get()),  0, self._maze.cols - 1)
-        except ValueError: return
+        except ValueError:
+            return
         self._maze.start = (sr, sc)
         self._maze.goal  = (gr, gc)
         self._redraw()
@@ -666,43 +829,31 @@ class App(ctk.CTk):
             rows, cols = self._maze.rows, self._maze.cols
         rows = _clamp(rows, 2, 25)
         cols = _clamp(cols, 2, 25)
-        
+
         gen_type = self._gen_type_var.get()
-        
         if gen_type == "Perfect (DFS)":
-            # Folosește algoritmul nativ importat din core.maze
             self._maze = generate_maze(rows, cols)
-            self.log(f"Generat labirint perfect {rows}x{cols} (DFS).")
+            self.log(f"Generated perfect maze {rows}x{cols} (DFS).")
         else:
-            # Generare aleatorie pe baza densității selectate
             import random
             new_maze = GridMaze(rows, cols)
             density = self._density_slider.get()
-            
-            # Generăm pereți interni orizontali (evităm marginile exterioare controlate de boundary)
             for r in range(1, rows):
                 for c in range(cols):
                     if random.random() < density:
                         new_maze.h_walls[r][c] = True
-                        
-            # Generăm pereți interni verticali
             for r in range(rows):
                 for c in range(1, cols):
                     if random.random() < density:
                         new_maze.v_walls[r][c] = True
-            
-            # Ne asigurăm că pozițiile de Start și Goal nu sunt blocate complet de pereți imediați
             sr, sc = new_maze.start
-            gr, gc = new_maze.goal
-            # Ștergem pereții din jurul punctului de start pentru siguranță
             new_maze.h_walls[sr][sc] = False
-            new_maze.h_walls[sr+1][sc] = False
+            new_maze.h_walls[sr + 1][sc] = False
             new_maze.v_walls[sr][sc] = False
-            new_maze.v_walls[sr][sc+1] = False
-            
+            new_maze.v_walls[sr][sc + 1] = False
             self._maze = new_maze
-            self.log(f"Generat labirint aleatoriu {rows}x{cols} (Densitate: {density:.2f}).")
-            
+            self.log(f"Generated random maze {rows}x{cols} (density={density:.2f}).")
+
         self._rows_var.set(str(rows))
         self._cols_var.set(str(cols))
         self._update_start_goal_entries()
@@ -730,7 +881,8 @@ class App(ctk.CTk):
     def _on_save_preset(self) -> None:
         dlg = ctk.CTkInputDialog(text="Preset name:", title="Save Preset")
         name = dlg.get_input()
-        if not name: return
+        if not name:
+            return
         key = re.sub(r"\W+", "_", name.lower())
         self._presets[key] = (name, self._maze.clone())
         save_maze_presets(_CONFIG, {k: v[1] for k, v in self._presets.items()}, {k: v[0] for k, v in self._presets.items()})
@@ -745,51 +897,71 @@ class App(ctk.CTk):
         self._redraw()
 
     def _on_apply_maze(self) -> None:
-        if not self.robot.connected: return
-        try: cs = float(self._cell_m.get())
-        except ValueError: cs = 0.5
+        if not self.robot.connected:
+            return
+        try:
+            cs = float(self._cell_m.get())
+        except ValueError:
+            cs = 0.5
         self._cell_size_m = cs
-        try: setup_grid_maze(self.robot.sim, self._maze, cell_size=cs)
-        except Exception: pass
+        try:
+            setup_grid_maze(self.robot.sim, self._maze, cell_size=cs)
+        except Exception:
+            pass
 
     def _on_clear_scene(self) -> None:
         if self.robot.connected:
-            try: clear_grid_maze(self.robot.sim)
-            except Exception: pass
+            try:
+                clear_grid_maze(self.robot.sim)
+            except Exception:
+                pass
 
     def _on_connect(self) -> None:
         if self.robot.connected:
             self.robot.disconnect()
-            self._conn_lbl.configure(text="● Deconectat", text_color="#ff3131")
-            self._conn_btn.configure(text="Conectare", fg_color="#1f6aa5")
+            self._conn_lbl.configure(text=" Disconnected", text_color=_SB_MUTED)
+            self._conn_dot.configure(text_color=_SB_DANGER)
+            self._conn_btn.configure(text="Connect", fg_color=_SB_ACCENT)
         else:
             host = self._host.get().strip() or "localhost"
-            try: port = int(self._port.get().strip())
-            except ValueError: port = 23000
+            try:
+                port = int(self._port.get().strip())
+            except ValueError:
+                port = 23000
             try:
                 self.robot.connect(host, port)
-                self._conn_lbl.configure(text="● Conectat", text_color="#55cc55")
-                self._conn_btn.configure(text="Deconectare", fg_color="#7a2020")
-            except Exception: pass
+                self._conn_lbl.configure(text=" Connected", text_color=_SB_ACCENT2)
+                self._conn_dot.configure(text_color=_SB_ACCENT2)
+                self._conn_btn.configure(text="Disconnect", fg_color="#7f1d1d")
+            except Exception:
+                pass
 
     def _rebuild_learning_params(self) -> None:
-        for w in self._params_frame.winfo_children(): w.destroy()
+        for w in self._params_frame.winfo_children():
+            w.destroy()
         self._param_sliders.clear()
         for p in QLearningBehavior(self.robot).get_param_defs():
             row = ctk.CTkFrame(self._params_frame, fg_color="transparent")
             row.pack(fill="x", pady=3)
-            ctk.CTkLabel(row, text=p["label"], width=120, anchor="w").pack(side="left")
-            vl = ctk.CTkLabel(row, text=f"{p['default']:.2f}", width=45)
-            sl = ctk.CTkSlider(row, from_=p["min"], to=p["max"], command=lambda v, l=vl: l.configure(text=f"{v:.2f}"))
+            ctk.CTkLabel(row, text=p["label"], width=140, anchor="w", text_color=_SB_MUTED, font=ctk.CTkFont(size=11)).pack(side="left")
+            vl = ctk.CTkLabel(row, text=f"{p['default']:.2f}", width=46, text_color=_SB_TEXT, font=ctk.CTkFont(size=11))
+            sl = ctk.CTkSlider(
+                row, from_=p["min"], to=p["max"],
+                button_color=_SB_ACCENT, progress_color=_SB_ACCENT,
+                command=lambda v, l=vl: l.configure(text=f"{v:.2f}")
+            )
             sl.set(p["default"])
             sl.pack(side="left", fill="x", expand=True, padx=4)
             vl.pack(side="left")
             self._param_sliders[p["name"]] = sl
 
     def _on_start_beh(self) -> None:
-        if not self.robot.connected: return
-        try: self.robot.load_robot()
-        except Exception: return
+        if not self.robot.connected:
+            return
+        try:
+            self.robot.load_robot()
+        except Exception:
+            return
         beh = QLearningBehavior(self.robot)
         mapping = {"Q-learning": 0, "SARSA": 1, "Expected SARSA": 2, "Dyna-Q": 3}
         beh.algo = mapping.get(self._algo_var.get(), 0)
@@ -811,51 +983,59 @@ class App(ctk.CTk):
             goal_x, goal_y = self._maze.cell_world_pos(*self._maze.goal, cell_sz)
             while not self._stop_event.is_set():
                 sensors = self.robot.read_sensors()
-                vl, vr = beh.step(sensors)
-                self.robot.set_velocity(vl, vr)
                 pos = self.robot.get_position()
+                vl, vr = beh.step(sensors, pos=pos)
+                self.robot.set_velocity(vl, vr)
                 if pos and len(pos) >= 2:
                     if math.hypot(pos[0] - goal_x, pos[1] - goal_y) < (cell_sz * 0.4):
-                        if hasattr(beh, '_episode'): beh._episode += 1
+                        if hasattr(beh, "_episode"):
+                            beh._episode += 1
                         self.robot.set_velocity(0.0, 0.0)
                         self.robot.stop_simulation()
                         time.sleep(0.1)
                         self.robot.start_simulation()
                         continue
-                try: self._q.put_nowait({"type": "tick", "status": beh.get_status(), "vl": vl, "vr": vr, "sensors": sensors, "pos": pos})
-                except queue.Full: pass
+                try:
+                    self._q.put_nowait({"type": "tick", "status": beh.get_status(), "vl": vl, "vr": vr, "sensors": sensors, "pos": pos})
+                except queue.Full:
+                    pass
                 time.sleep(DT)
-        except Exception: pass
+        except Exception:
+            pass
         finally:
             try:
                 self.robot.set_velocity(0.0, 0.0)
                 self.robot.stop_simulation()
-            except Exception: pass
-            try: self._q.put_nowait({"type": "stopped"})
-            except queue.Full: pass
+            except Exception:
+                pass
+            try:
+                self._q.put_nowait({"type": "stopped"})
+            except queue.Full:
+                pass
 
     def _on_run_compare(self) -> None:
-        try: eps = int(self._exp_episodes.get())
-        except Exception: eps = 50
+        try:
+            eps = int(self._exp_episodes.get())
+        except Exception:
+            eps = 50
         self._stop_event.clear()
         self._btn_bench.configure(state="disabled")
         threading.Thread(target=self._run_compare_worker, args=(eps,), daemon=True).start()
 
     def _run_compare_worker(self, episodes: int) -> None:
-        import csv
         import matplotlib.pyplot as plt
         if not self.robot.connected:
-            self._append_exp_output("Eroare: Conectează CoppeliaSim mai întâi!")
+            self._append_exp_output("Error: Connect to CoppeliaSim first!")
             self._btn_bench.configure(state="normal")
             return
 
         algoritmi = {0: "Q-learning", 1: "SARSA", 2: "Expected SARSA", 3: "Dyna-Q"}
-        results = {id_alg: [] for id_alg in algoritmi.keys()}
+        results = {id_alg: [] for id_alg in algoritmi}
         try:
             self.robot.load_robot()
             self.robot.start_simulation()
             for algo_id, algo_name in algoritmi.items():
-                self._append_exp_output(f"\n[START] Rulează modelul: {algo_name}")
+                self._append_exp_output(f"\n[START] Running model: {algo_name}")
                 beh = QLearningBehavior(self.robot)
                 beh.algo = algo_id
                 ep_done = 0
@@ -863,43 +1043,50 @@ class App(ctk.CTk):
                 current_ep_reward = 0.0
                 while ep_done < episodes and not self._stop_event.is_set():
                     sensors = self.robot.read_sensors()
-                    vl, vr = beh.step(sensors)
+                    pos = self.robot.get_position()
+                    vl, vr = beh.step(sensors, pos=pos)
                     self.robot.set_velocity(vl, vr)
-                    current_ep_reward += getattr(beh, '_last_reward', 0.0)
+                    current_ep_reward += getattr(beh, "_last_reward", 0.0)
                     if beh._episode != last_episode:
                         results[algo_id].append(current_ep_reward)
                         ep_done += 1
                         last_episode = beh._episode
                         if ep_done % 10 == 0 or ep_done == episodes:
-                            self._append_exp_output(f"  -> {algo_name} | Episod {ep_done}/{episodes} încheiat.")
+                            self._append_exp_output(f"  → {algo_name} | Episode {ep_done}/{episodes} done.")
                         current_ep_reward = 0.0
                     time.sleep(DT)
-                if self._stop_event.is_set(): break
+                if self._stop_event.is_set():
+                    break
 
-            # Salvare date grafic
             fig, ax = plt.subplots(figsize=(9, 5))
             for algo_id, algo_name in algoritmi.items():
                 if results[algo_id]:
-                    ax.plot(range(1, len(results[algo_id])+1), results[algo_id], label=algo_name, linewidth=2)
-            ax.set_title("Studiu Comparativ Modele Reinforcement Learning"); ax.set_xlabel("Episoade"); ax.set_ylabel("Recompensă Cumulată")
-            ax.grid(True); ax.legend()
+                    ax.plot(range(1, len(results[algo_id]) + 1), results[algo_id], label=algo_name, linewidth=2)
+            ax.set_title("Comparative RL Model Study")
+            ax.set_xlabel("Episodes")
+            ax.set_ylabel("Cumulative Reward")
+            ax.grid(True)
+            ax.legend()
             fig.savefig(_ROOT / "config" / "benchmark_last.png", bbox_inches="tight")
             plt.close(fig)
-            self._append_exp_output("\n[SUCCES] Benchmark finalizat! Graficul s-a actualizat pe pagina principală.")
+            self._append_exp_output("\n[DONE] Benchmark complete! Chart saved.")
         except Exception as e:
-            self._append_exp_output(f"Eroare proces: {e}")
+            self._append_exp_output(f"Error: {e}")
         finally:
-            try: self.robot.stop_simulation()
-            except Exception: pass
+            try:
+                self.robot.stop_simulation()
+            except Exception:
+                pass
             self._btn_bench.configure(state="normal")
 
     def _append_exp_output(self, text: str) -> None:
         try:
-            self._exp_output.configure(state='normal')
-            self._exp_output.insert('end', text + "\n")
-            self._exp_output.see('end')
-            self._exp_output.configure(state='disabled')
-        except Exception: pass
+            self._exp_output.configure(state="normal")
+            self._exp_output.insert("end", text + "\n")
+            self._exp_output.see("end")
+            self._exp_output.configure(state="disabled")
+        except Exception:
+            pass
 
     def _update_sensors(self, sensors: list[SensorReading], pos: tuple) -> None:
         for bar, lbl, s in zip(self._sbars, self._sdist, sensors):
@@ -910,37 +1097,79 @@ class App(ctk.CTk):
                 bar.set(0.0)
                 lbl.configure(text="---")
         if pos and len(pos) >= 2:
-            self._pos_lbl.configure(text=f"X={pos[0]:.2f} Y={pos[1]:.2f}")
+            self._pos_lbl.configure(text=f"Pos: X={pos[0]:.2f}  Y={pos[1]:.2f}")
 
     def _poll(self) -> None:
         try:
             while True:
                 msg = self._q.get_nowait()
                 if msg["type"] == "tick":
-                    self._beh_status.configure(text=f"Status: {msg['status']}")
-                    self._vel_lbl.configure(text=f"Viteze Motoare: vL = {msg['vl']:+.2f} | vR = {msg['vr']:+.2f}")
+                    self._beh_status.configure(text=f"Agent Status: {msg['status']}")
+                    self._vel_lbl.configure(text=f"Motors: vL = {msg['vl']:+.2f}  ·  vR = {msg['vr']:+.2f}")
                     if self._auto_refresh.get():
                         self._update_sensors(msg["sensors"], msg["pos"])
                 elif msg["type"] == "stopped":
                     self._start_btn.configure(state="normal")
                     self._stop_btn.configure(state="disabled")
-        except queue.Empty: pass
+        except queue.Empty:
+            pass
         self.after(80, self._poll)
 
     def log(self, msg: str) -> None:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._log_box.configure(state="normal")
-        self._log_box.insert("end", f"[{ts}] {msg}\n")
+        self._log_box.insert("end", f"[{ts}]  {msg}\n")
         self._log_box.see("end")
         self._log_box.configure(state="disabled")
 
 
-def _sep(parent: ctk.CTkFrame) -> None:
-    ctk.CTkFrame(parent, height=1, fg_color="#1a103c").pack(fill="x", padx=12, pady=10)
+# ── Helper widgets ────────────────────────────────────────────────────
+
+def _card(parent, border_color: str = "#1e3a5c") -> ctk.CTkFrame:
+    return ctk.CTkFrame(parent, fg_color=_SB_CARD, corner_radius=10, border_width=1, border_color=border_color)
+
+
+def _divider(parent, color: str = "#1e3a5c") -> None:
+    ctk.CTkFrame(parent, height=1, fg_color=color).pack(fill="x", padx=10, pady=8)
+
+
+def _section_label(parent, text: str) -> None:
+    ctk.CTkLabel(
+        parent, text=text,
+        font=ctk.CTkFont(size=9, weight="bold"),
+        text_color=_SB_MUTED
+    ).pack(anchor="w", padx=14, pady=(10, 2))
+
+
+def _primary_btn(parent, text: str, command, color: str = _SB_ACCENT) -> ctk.CTkButton:
+    return ctk.CTkButton(
+        parent, text=text, command=command,
+        fg_color=color, hover_color="#2563eb",
+        corner_radius=8, height=34,
+        font=ctk.CTkFont(size=12, weight="bold")
+    )
+
+
+def _ghost_btn(parent, text: str, command) -> ctk.CTkButton:
+    return ctk.CTkButton(
+        parent, text=text, command=command,
+        fg_color="transparent", hover_color="#1a2d47",
+        border_width=1, border_color=_SB_CARD_B,
+        text_color=_SB_MUTED, corner_radius=8, height=34,
+        font=ctk.CTkFont(size=12)
+    )
+
+
+def _page_header(parent, title: str, subtitle: str = "") -> None:
+    ctk.CTkLabel(parent, text=title, font=ctk.CTkFont(size=22, weight="bold"), text_color=_SB_TEXT).pack(anchor="w", pady=(0, 2))
+    if subtitle:
+        ctk.CTkLabel(parent, text=subtitle, font=ctk.CTkFont(size=12), text_color=_SB_MUTED).pack(anchor="w", pady=(0, 14))
+
 
 def _draw_marker(canvas: tk.Canvas, cx: float, cy: float, r: float, color: str, label: str) -> None:
     canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=color, outline="white", width=1)
     canvas.create_text(cx, cy, text=label, fill="white", font=("Arial", max(8, int(r * 1.1)), "bold"))
+
 
 def _set_entry(e: ctk.CTkEntry, v: str) -> None:
     e.delete(0, "end")
